@@ -1,8 +1,10 @@
 #!/usr/bin/env groovy
+import java.net.http.*
+import java.time.LocalDate
+
 import groovy.cli.picocli.CliBuilder
 import groovy.json.JsonSlurper
 import groovy.transform.Field
-import java.net.http.*
 
 @Field final String JIRA_REST_URL = 'https://ticket.opower.com/rest/api/latest'
 @Field final JsonSlurper json = new JsonSlurper()
@@ -59,27 +61,31 @@ cli.usageMessage.with {
  synopsisHeading('%nA command-line tool to create or update version information for multiple JIRA projects in a single category%n')
 }
 cli.h(longOpt:'help', 'priont this message')
-cli.u(type: String, longOpt:'user', defaultValue: env.USER, 'The JIRA Username, defaults to $USER')
-cli.p(type: String, longOpt:'password', defaultValue: env.PASSWORD, 'The JIRA password, defaults to $PASSWORD')
-cli.c(type: String, longOpt:'category', defaultValue: env.JIRA_CATEGORY, 'The JIRA Category to update project versions within, defaults to $JIRA_CATEGORY')
+cli.u(type: String, longOpt:'user', defaultValue: env.USER, 'The JIRA Username, defaults to $USER. Required')
+cli.p(type: String, longOpt:'password', defaultValue: env.PASSWORD, 'The JIRA password, defaults to $PASSWORD. Required')
+cli.c(type: String, longOpt:'category', defaultValue: env.JIRA_CATEGORY, 'The JIRA Category to update project versions within, defaults to $JIRA_CATEGORY. Required')
 
-options = cli.parse(args)
+cli.n(type: String, longOpt:'name', 'The version name to create or update. Required')
+cli.s(type: LocalDate, longOpt:'start', 'The start date for the version. Required')
+cli.r(type: LocalDate, longOpt:'release', 'The release date for the version. Required')
 
-if (options.h || !options.u || !options.p || !options.c) {
+opts = cli.parse(args)
+
+if (opts.h || !opts.u || !opts.p || !opts.c || !opts.n || !opts.s || !opts.r ) {
   cli.usage()
   return 1
 }
 
 println "Validating credentials"
 try {
-  AuthHolder.initialize(options.u, options.p)
+  AuthHolder.initialize(opts.u, opts.p)
 
   get("/mypermissions")
 
   println "Authentication success!"
 
-  def projects = get("/project").findAll { it.projectCategory?.name == options.c }
-  println "found '${options.c}' category projects: ${projects.key}"
+  def projects = get("/project").findAll { it.projectCategory?.name == opts.c }
+  println "found '${opts.c}' category projects: ${projects.key}"
 
 }
 catch (Exception e) {
