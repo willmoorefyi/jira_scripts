@@ -2,14 +2,19 @@ import com.atlassian.jira.bc.issue.search.SearchService
 import com.atlassian.jira.component.ComponentAccessor
 import com.atlassian.jira.event.type.EventDispatchOption
 import com.atlassian.jira.jql.parser.JqlQueryParser
+import com.atlassian.jira.project.Project
+import com.atlassian.jira.project.ProjectManager
+import com.atlassian.jira.project.version.Version
+import com.atlassian.jira.project.version.VersionManager
 import com.atlassian.jira.web.bean.PagerFilter
 
 import org.apache.log4j.Logger
 import org.apache.log4j.Level
 
-final String fixVersions = "19.10,19.11,19.12,19.13,19.14,20.0,20.1,20.2,20.3,20.4"
-final String planningName = "2019 Q4 PP 19.13"
-final String dateUsed = "2019-10-30"
+//final String fixVersions = "19.10,19.11,19.12,19.13,19.14,20.0,20.1,20.2,20.3,20.4"
+final String fixVersions = ""
+final String planningName = "2019 Q4 PP 19.14"
+final String dateUsed = "2019-12-18"
 
 final Logger log = Logger.getLogger("com.oracle.ugbu.UpdateCommittedFixVersion")
 log.setLevel(Level.DEBUG)
@@ -20,8 +25,16 @@ if (fixVersions?.trim()) {
     fixVersionList += Arrays.asList(fixVersions.split(/,/))
 }
 else {
-    // TODO get all active versions
     log.info("fix versions is empty")
+    ProjectManager projectManager = ComponentAccessor.getProjectManager()
+    VersionManager versionManager = ComponentAccessor.getVersionManager()
+
+    Collection<Project> projects = projectManager.getProjectsFromProjectCategory(projectManager.getProjectCategoryObjectByName("DSM"))
+    fixVersionList += versionManager.getAllVersionsForProjects(projects, false).inject([] as Set) { acc, version  ->
+        !version.isReleased() && !version.isArchived() && acc << version.getName()
+        acc
+    }
+    fixVersionList -= "TBD"
 }
 
 log.info("Locking in version ${fixVersionList.join(",")} for planning ${planningName} and date ${dateUsed}")
