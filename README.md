@@ -12,3 +12,4 @@ A command-line tool to create or update version information for multiple JIRA pr
 
 * Tested with: Groovy 2.5.8, Java 11
 * Usage: `groovy create_update_version -h`
+
