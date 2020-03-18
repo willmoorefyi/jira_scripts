@@ -12,8 +12,8 @@ import org.apache.log4j.Level
 
 final String fixVersions = "19.10,19.11,19.12,19.13,19.14,20.0,20.1,20.2,20.3,20.4,20.5,20.6,20.7,20.8,20.9,20.10"
 //final String fixVersions = ""
-final String planningName = "20.0"
-final String dateUsed = "2020-01-21"
+final String planningName = "20.2"
+final String dateUsed = "2020-03-04"
 
 final Logger log = Logger.getLogger("com.oracle.ugbu.UpdateCommittedFixVersion")
 log.setLevel(Level.DEBUG)
@@ -53,7 +53,7 @@ fixVersionList.each { fixVersion ->
 
     def query = jqlQueryParser.parseQuery(jqlQuery)
     def results = searchProvider.search(user, query, PagerFilter.unlimitedFilter)
-    results.issues.collect { issue -> issueManager.getIssueObject(issue.id) }
+    results.getResults().collect { issue -> issueManager.getIssueObject(issue.id) }
             .each { issue ->
                 println "Operating on issue ${issue.getKey()} ..."
                 log.info("ISSUE KEY : " + issue.getKey())
@@ -71,7 +71,7 @@ fixVersionList.each { fixVersion ->
                 String value = "|| PP Iteration || Fix Version ||\n${iterations}"
                 log.info("\t\tSetting value: ${value} ")
                 issue.setCustomFieldValue(committedFixVersionField, value)
-                ComponentAccessor.getIssueManager().updateIssue(user, issue, EventDispatchOption.ISSUE_UPDATED, false)
+                issueManager.updateIssue(user, issue, EventDispatchOption.ISSUE_UPDATED, false)
             }
 }
 println "Done"
