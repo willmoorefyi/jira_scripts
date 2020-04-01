@@ -10,10 +10,10 @@ import com.atlassian.jira.web.bean.PagerFilter
 import org.apache.log4j.Logger
 import org.apache.log4j.Level
 
-final String fixVersions = "19.10,19.11,19.12,19.13,19.14,20.0,20.1,20.2,20.3,20.4,20.5,20.6,20.7,20.8,20.9,20.10"
-//final String fixVersions = ""
-final String planningName = "20.2"
-final String dateUsed = "2020-03-04"
+//final String fixVersions = "19.10,19.11,19.12,19.13,19.14,20.0,20.1,20.2,20.3,20.4,20.5,20.6,20.7,20.8,20.9,20.10"
+final String fixVersions = ""
+final String planningName = "20.3"
+final String dateUsed = "2020-03-30"
 
 final Logger log = Logger.getLogger("com.oracle.ugbu.UpdateCommittedFixVersion")
 log.setLevel(Level.DEBUG)
