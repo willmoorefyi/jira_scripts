@@ -1,8 +1,11 @@
 #!/usr/bin/env groovy
+@GrabConfig(systemClassLoader=true)
+
 import java.net.http.*
 import java.text.NumberFormat;
 import java.util.Locale;
 
+@Grab('info.picocli:picocli:4.2.0')
 import groovy.cli.picocli.CliBuilder
 import groovy.json.JsonBuilder
 import groovy.json.JsonSlurper
@@ -12,6 +15,9 @@ import groovy.transform.Field
 
 @Field final String JIRA_REST_URL = 'https://ticket.opower.com/rest/api/latest'
 @Field final JsonSlurper json = new JsonSlurper()
+
+static String qruPlanFixVersion = "20.3"
+static String fixVersions = [ "20.4", "20.5", "20.6", "20,7" ]
 
 class AuthHolder {
     static def instance
@@ -91,7 +97,7 @@ try {
 
     def searchBody = [:]
     searchBody.jql = '''\
-category = DSM AND issuetype = Feature  AND "UGBU Scrum Team" != AP-BURLAKI  AND ("Committed Fix Version" ~ "\\"PP 20.0\\"" OR "Committed Fix Version" ~ "\\"PP 20.1\\""  OR "Committed Fix Version" ~ "\\"PP 20.2\\"" OR "Committed Fix Version" ~ "\\"PP 19.14\\"")  and fixVersion NOT IN (19.14, 19.13, 19.12) order by "UGBU Scrum Team", fixVersion 
+category = DSM AND issuetype = Feature  AND "UGBU Scrum Team" != AP-BURLAKI  AND ("Committed Fix Version" ~ "\\"PP 20.3\\"" OR "Committed Fix Version" ~ "\\"PP 20.4\\""  OR "Committed Fix Version" ~ "\\"PP 20.5\\"" OR "Committed Fix Version" ~ "\\"PP 20.6\\"")  and fixVersion NOT IN (20.3, 20.2, 20.1, 20.0, 19.14, 19.13, 19.12) order by "UGBU Scrum Team", fixVersion 
 '''
     searchBody.startAt = 0
     searchBody.maxResults = 500
@@ -137,14 +143,14 @@ category = DSM AND issuetype = Feature  AND "UGBU Scrum Team" != AP-BURLAKI  AND
         if (currentStatus == 'Closed') {
             issuesCompletedInQuarter << issue
             classifiers.issueCompletedInQuarter = 1
-        } else if (currentStatus == 'Launching' && fixVersion == '20.3' && committedFixVersion*.value[-1] == '20.3') {
+        } else if (currentStatus == 'Launching' && fixVersion == '20.7' && committedFixVersion*.value[-1] == '20.7') {
             issuesLaunching << issue
             classifiers.issueLaunching = 1
         } else {
             issuesSlippedOutOfQuarter << issue
             classifiers.issueSlippedOutOfQuarter = 1
         }
-        if (committedFixVersion*.key.any { it == '19.14' || it == '20.0' }) {
+        if (committedFixVersion*.key.any { it == '20.3' || it == '20.4' }) {
             committedIssues << issue
             classifiers.committedIssue = 1
         } else {
@@ -171,13 +177,13 @@ category = DSM AND issuetype = Feature  AND "UGBU Scrum Team" != AP-BURLAKI  AND
     final NumberFormat format = NumberFormat.getPercentInstance(Locale.US);
 
     println "Total features: ${totalIssues}"
-    println "Commited Features: total ${committedIssues.size()}, % of total: ${format.format(committedIssues.size()/totalIssues)}"
-    println "Feature added mid-quarter: total ${issuesAddedMidQuarter.size()}, % of total: ${format.format(issuesAddedMidQuarter.size()/totalIssues)}"
-    println "Features Completed In Quarter: total ${issuesCompletedInQuarter.size()}, % of total: ${format.format(issuesCompletedInQuarter.size()/totalIssues)}"
-    println "Features slipped out of Quarter: total ${issuesSlippedOutOfQuarter.size()}, % of total: ${format.format(issuesSlippedOutOfQuarter.size()/totalIssues)}"
-    println "Features completed but slipped, not OCI: total ${issuesSlippedNotOCI.size()}, % of total: ${format.format(issuesSlippedNotOCI.size()/totalIssues)}"
-    println "OCI Features completed but slipped: total ${issuesSlippedOCI.size()}, % of total: ${format.format(issuesSlippedOCI.size()/totalIssues)}"
-    println "Issues launching in 20.3: total ${issuesLaunching.size()}, % of total ${format.format(issuesLaunching.size() /totalIssues)}"
+    println "Committed,Commited Features,${committedIssues.size()},% of total: ${format.format(committedIssues.size()/totalIssues)}"
+    println "AddedMidQuarter,Feature added mid-quarter,${issuesAddedMidQuarter.size()},% of total: ${format.format(issuesAddedMidQuarter.size()/totalIssues)}"
+    println "CompletedInQuarter,Features Completed In Quarter,${issuesCompletedInQuarter.size()},% of total: ${format.format(issuesCompletedInQuarter.size()/totalIssues)}"
+    println "SlippedOutOfQuarter,Features slipped out of Quarter,${issuesSlippedOutOfQuarter.size()},% of total: ${format.format(issuesSlippedOutOfQuarter.size()/totalIssues)}"
+    println "SlippedNotOCI,Features slipped; not OCI,${issuesSlippedNotOCI.size()},% of total: ${format.format(issuesSlippedNotOCI.size()/totalIssues)}"
+    println "SlippedOCI,OCI Features slipped for OCI,${issuesSlippedOCI.size()},% of total: ${format.format(issuesSlippedOCI.size()/totalIssues)}"
+    println "Launching,Issues launching in 20.7,${issuesLaunching.size()},% of total ${format.format(issuesLaunching.size() /totalIssues)}"
 
 }
 catch (Exception e) {
