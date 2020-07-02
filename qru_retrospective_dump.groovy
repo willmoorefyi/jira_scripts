@@ -16,8 +16,8 @@ import groovy.transform.Field
 @Field final String JIRA_REST_URL = 'https://ticket.opower.com/rest/api/latest'
 @Field final JsonSlurper json = new JsonSlurper()
 
-static String qruPlanFixVersion = "20.3"
-static String fixVersions = [ "20.4", "20.5", "20.6", "20,7" ]
+final String qruPlanFixVersion = "20.3"
+final def fixVersions = [ '20.4', '20.5', '20.6', '20.7' ]
 
 class AuthHolder {
     static def instance
@@ -96,18 +96,18 @@ try {
     println "Authentication success!"
 
     def searchBody = [:]
-    searchBody.jql = '''\
-category = DSM AND issuetype = Feature  AND "UGBU Scrum Team" != AP-BURLAKI  AND ("Committed Fix Version" ~ "\\"PP 20.3\\"" OR "Committed Fix Version" ~ "\\"PP 20.4\\""  OR "Committed Fix Version" ~ "\\"PP 20.5\\"" OR "Committed Fix Version" ~ "\\"PP 20.6\\"")  and fixVersion NOT IN (20.3, 20.2, 20.1, 20.0, 19.14, 19.13, 19.12) order by "UGBU Scrum Team", fixVersion 
-'''
+    searchBody.jql = """
+category = DSM AND issuetype = Feature AND (\"Committed Fix Version\" ~ \"\\\"PP ${qruPlanFixVersion}\\\"\" OR ${ -> fixVersions.collect(it -> "\"Committed Fix Version\" ~ \"\\\"PP ${it}\\\"\"").join(" OR ")}) order by \"UGBU Scrum Team\", fixVersion
+"""
     searchBody.startAt = 0
     searchBody.maxResults = 500
     searchBody.fields = [ 'status', 'key', 'Summary', 'reporter', 'customfield_15751', 'customfield_14670', 'fixVersions', 'customfield_16851' ]
 
     def results = http('/search', 'POST', HttpRequest.BodyPublishers.ofString("${JsonOutput.toJson(searchBody)}"))
 
-    //println "found '${new JsonBuilder(results).toPrettyString()}'"
+    // println "found '${new JsonBuilder(results).toPrettyString()}'"
 
-    def totalIssues = results.total
+    def totalIssues = 0
     def committedIssues = []
     def issuesCompletedInQuarter = []
     def issuesSlippedOutOfQuarter = []
@@ -117,16 +117,25 @@ category = DSM AND issuetype = Feature  AND "UGBU Scrum Team" != AP-BURLAKI  AND
     def issuesLaunching = []
 
     results.issues.each { issue ->
-        def fixVersion = issue.fields.fixVersions[0].name
+        def fixVersion = issue.fields.fixVersions[0]?.name
         def currentStatus = issue.fields.status.name
         def reporter = issue.fields.reporter.key
-        def ugbuScrumTeam = issue.fields.customfield_15751.value
+        def ugbuScrumTeam = issue.fields.customfield_15751?.value
         def committedFixVersion = issue.fields.customfield_16851.split(/\n/)
                 .minus("")
                 .findAll { val -> !val.contains('||') }
                 .collect { val -> val.split(/\|/) - '' }
                 .inject([:]) { acc, val -> acc << [(((val[0].trim()) =~ /\d{2,}\.\d{1,2}/)?.getAt(0)): val[1].trim()] }
-                .findAll { elem -> elem.key == '19.14' || elem.key =~ /20.\d+/ }
+                .findAll { elem -> elem.key =~ /\d{2}.\d{1,2}/ }
+
+        // filter out the stuff we don't care about
+        if(!(ugbuScrumTeam in ['Hotline', 'Jedi', 'Moonzai', 'Red Alerts', 'TEAM 1', 'Team Alpha', 'The Lights Watch', 'Viz Kidz'])) {
+            return
+        }
+        // filter out features for next quarter plan
+        if (!committedFixVersion*.value.any { it in fixVersions }) {
+            return
+        }
 
         def classifiers = [
                 committedIssue: 0,
@@ -138,19 +147,20 @@ category = DSM AND issuetype = Feature  AND "UGBU Scrum Team" != AP-BURLAKI  AND
                 issueLaunching: 0
         ]
 
-        //println "Processing issue: ${issue.key} with status ${currentStatus} committed fix versions: ${committedFixVersion}"
+        // println "Processing issue: ${issue.key} with status ${currentStatus} committed fix versions: ${committedFixVersion}"
 
+        totalIssues++
         if (currentStatus == 'Closed') {
             issuesCompletedInQuarter << issue
             classifiers.issueCompletedInQuarter = 1
-        } else if (currentStatus == 'Launching' && fixVersion == '20.7' && committedFixVersion*.value[-1] == '20.7') {
+        } else if (currentStatus == 'Launching' && fixVersion == fixVersions[-1] && committedFixVersion*.value[-1] == fixVersions[-1]) {
             issuesLaunching << issue
             classifiers.issueLaunching = 1
         } else {
             issuesSlippedOutOfQuarter << issue
             classifiers.issueSlippedOutOfQuarter = 1
         }
-        if (committedFixVersion*.key.any { it == '20.3' || it == '20.4' }) {
+        if (committedFixVersion*.key.any { it == qruPlanFixVersion }) {
             committedIssues << issue
             classifiers.committedIssue = 1
         } else {
@@ -176,14 +186,15 @@ category = DSM AND issuetype = Feature  AND "UGBU Scrum Team" != AP-BURLAKI  AND
 
     final NumberFormat format = NumberFormat.getPercentInstance(Locale.US);
 
-    println "Total features: ${totalIssues}"
-    println "Committed,Commited Features,${committedIssues.size()},% of total: ${format.format(committedIssues.size()/totalIssues)}"
-    println "AddedMidQuarter,Feature added mid-quarter,${issuesAddedMidQuarter.size()},% of total: ${format.format(issuesAddedMidQuarter.size()/totalIssues)}"
-    println "CompletedInQuarter,Features Completed In Quarter,${issuesCompletedInQuarter.size()},% of total: ${format.format(issuesCompletedInQuarter.size()/totalIssues)}"
-    println "SlippedOutOfQuarter,Features slipped out of Quarter,${issuesSlippedOutOfQuarter.size()},% of total: ${format.format(issuesSlippedOutOfQuarter.size()/totalIssues)}"
-    println "SlippedNotOCI,Features slipped; not OCI,${issuesSlippedNotOCI.size()},% of total: ${format.format(issuesSlippedNotOCI.size()/totalIssues)}"
-    println "SlippedOCI,OCI Features slipped for OCI,${issuesSlippedOCI.size()},% of total: ${format.format(issuesSlippedOCI.size()/totalIssues)}"
-    println "Launching,Issues launching in 20.7,${issuesLaunching.size()},% of total ${format.format(issuesLaunching.size() /totalIssues)}"
+    println ""
+    println "Total, Total Features, ${totalIssues}"
+    println "Committed,Commited Features,${committedIssues.size()}, of total: ${format.format(committedIssues.size()/totalIssues)}"
+    println "AddedMidQuarter,Feature added mid-quarter,${issuesAddedMidQuarter.size()}, of total: ${format.format(issuesAddedMidQuarter.size()/totalIssues)}"
+    println "CompletedInQuarter,Features Completed In Quarter,${issuesCompletedInQuarter.size()}, of total: ${format.format(issuesCompletedInQuarter.size()/totalIssues)}"
+    println "SlippedOutOfQuarter,Features slipped out of Quarter,${issuesSlippedOutOfQuarter.size()}, of total: ${format.format(issuesSlippedOutOfQuarter.size()/totalIssues)}"
+    println "SlippedNotOCI,Features slipped; not OCI,${issuesSlippedNotOCI.size()}, of total: ${format.format(issuesSlippedNotOCI.size()/totalIssues)}"
+    println "SlippedOCI,OCI Features slipped for OCI,${issuesSlippedOCI.size()}, of total: ${format.format(issuesSlippedOCI.size()/totalIssues)}"
+    println "Launching,Issues launching in 20.7,${issuesLaunching.size()}, of total ${format.format(issuesLaunching.size() /totalIssues)}"
 
 }
 catch (Exception e) {
