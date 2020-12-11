@@ -3,7 +3,15 @@ import java.net.http.*
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
-import groovy.cli.picocli.CliBuilder
+@Grab('info.picocli:picocli-groovy:4.5.2')
+@GrabConfig(systemClassLoader=true)
+@Command(name = "create_update_version",
+        version = "0.0.1",
+        mixinStandardHelpOptions = true, // add --help and --version options
+        description = "A command-line tool to create or update version information for multiple JIRA projects in a single category")
+@picocli.groovy.PicocliScript
+import static picocli.CommandLine.*
+
 import groovy.json.JsonSlurper
 import groovy.json.JsonOutput
 import groovy.transform.Field
@@ -11,6 +19,24 @@ import groovy.transform.Field
 @Field final String JIRA_REST_URL = 'https://ticket.opower.com/rest/api/latest'
 @Field final JsonSlurper json = new JsonSlurper()
 @Field final DateTimeFormatter jiraDateTimeFormat = DateTimeFormatter.ofPattern("d/MMM/yy")
+
+@Option(names = ["-u", "--user"], description = 'The JIRA Username, defaults to $USERNAME. Required')
+@Field String username = System.getenv().USERNAME
+
+@Option(names = ["-p", "--password"], description = 'The JIRA password, defaults to $PASSWORD. Required')
+@Field String password = System.getenv().PASSWORD
+
+@Option(names = ["-c", "--category"], description = 'The JIRA Category to update project versions within, defaults to $JIRA_CATEGORY. Required')
+@Field String category = System.getenv().JIRA_CATEGORY
+
+@Option(names = ["-n", "--name"], description = 'The version name to create or update. Required', required = true)
+@Field String versionName
+
+@Option(names = ["-s", "--start"], description = 'The start date for the version. Required', required = true)
+@Field LocalDate start
+
+@Option(names = ["-r", "--release"], description = 'The release date for the version. Required', required = true)
+@Field LocalDate release
 
 class AuthHolder {
   static def instance
@@ -62,43 +88,19 @@ def http(path, method="GET", requestBody=null) {
   json.parseText response.body()
 }
 
-def env = System.getenv()
-
-def cli = new CliBuilder()
-cli.name = 'groovy create_update_version'
-cli.usageMessage.with {
- synopsisHeading('%nA command-line tool to create or update version information for multiple JIRA projects in a single category%n')
-}
-cli.h(longOpt:'help', 'priont this message')
-cli.u(type: String, longOpt:'user', defaultValue: env.USER, 'The JIRA Username, defaults to $USER. Required')
-cli.p(type: String, longOpt:'password', defaultValue: env.PASSWORD, 'The JIRA password, defaults to $PASSWORD. Required')
-cli.c(type: String, longOpt:'category', defaultValue: env.JIRA_CATEGORY, 'The JIRA Category to update project versions within, defaults to $JIRA_CATEGORY. Required')
-
-cli.n(type: String, longOpt:'name', 'The version name to create or update. Required')
-cli.s(type: LocalDate, longOpt:'start', 'The start date for the version. Required')
-cli.r(type: LocalDate, longOpt:'release', 'The release date for the version. Required')
-
-opts = cli.parse(args)
-
-if (opts.h || !opts.u || !opts.p || !opts.c || !opts.n || !opts.s || !opts.r ) {
-  cli.usage()
-  return 1
-}
-
-final String versionName = opts.n
-final String versionStart = opts.s.format(jiraDateTimeFormat)
-final String versionRelease = opts.r.format(jiraDateTimeFormat)
+final String versionStart = start.format(jiraDateTimeFormat)
+final String versionRelease = release.format(jiraDateTimeFormat)
 
 println "Validating credentials"
 try {
-  AuthHolder.initialize(opts.u, opts.p)
+  AuthHolder.initialize(username, password)
 
   http '/mypermissions'
 
   println "Authentication success!"
 
-  def projects = http('/project').findAll { it.projectCategory?.name == opts.c }
-  println "found '${opts.c}' category projects: ${projects*.key}"
+  def projects = http('/project').findAll { it.projectCategory?.name == category }
+  println "found '${category}' category projects: ${projects*.key}"
 
   projects.each { project ->
     def version = http("/project/${project.key}/versions").find { it.name == versionName }
