@@ -96,7 +96,7 @@ try {
   def request = [:]
   request.jql = "category = DSM AND type in (\"user story\", bug, task) AND updated > -${daysBack}d AND \"Feature Link\" is EMPTY"
   request.startAt = 0
-  request.maxResults = 1
+  request.maxResults = 100
   request.fields = [ 'key', 'summary', 'UGBU Scrum Team' ]
   request.expand = [ 'changelog' ]
 
@@ -104,16 +104,29 @@ try {
   final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSZ")
 
   def issuesNoFeature = http '/search', 'POST', HttpRequest.BodyPublishers.ofString("${toJson(request)}")
+  def total = issuesNoFeature.total
 
-  //println "Results found: ${issuesNoFeatures.total}"
+  println "Results found: ${total}"
 
   def results = issuesNoFeature.issues.collect { issue ->
     def result = [:]
     result.key = issue.key
     result.summary = issue.fields.summary
-    result.history = issue.changelog.histories.findAll { entry -> ZonedDateTime.parse(entry.created, formatter).toInstant() > dateFilter }
+    result.history = issue.changelog.histories
+      .findAll { entry -> ZonedDateTime.parse(entry.created, formatter).toInstant() > dateFilter }
+      .collect { entry -> 
+        def historyEntry = [:]
+        historyEntry.author = entry.displayName
+        historyEntry.timestamp = ZonedDateTime.parse(entry.created, formatter).format(DateTimeFormatter.RFC_1123_DATE_TIME)
+        historyEntry.changes = entry.items.collect { item ->
+          def historyItem = [:]
+          historyItem.field = item.field
+          historyItem.from = item.fromString
+          historyItem.to = item.toString
+          historyItem
+        }
+      }
     result
-    //println "history entries: ${prettyPrint(toJson(result))}"
   }
 
   println "history entries: ${prettyPrint(toJson(results))}"
