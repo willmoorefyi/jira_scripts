@@ -105,10 +105,18 @@ try {
 
   def issuesNoFeature = http '/search', 'POST', HttpRequest.BodyPublishers.ofString("${toJson(request)}")
 
-  issuesNoFeature.issues.each { issue -> 
-    def historyEntries = issue.changelog.histories.findAll { entry -> ZonedDateTime.parse(entry.created, formatter).toInstant() > dateFilter }
-    println "history entries: ${prettyPrint(toJson(historyEntries))}"
+  //println "Results found: ${issuesNoFeatures.total}"
+
+  def results = issuesNoFeature.issues.collect { issue ->
+    def result = [:]
+    result.key = issue.key
+    result.summary = issue.fields.summary
+    result.history = issue.changelog.histories.findAll { entry -> ZonedDateTime.parse(entry.created, formatter).toInstant() > dateFilter }
+    result
+    //println "history entries: ${prettyPrint(toJson(result))}"
   }
+
+  println "history entries: ${prettyPrint(toJson(results))}"
 
 }
 catch (Exception e) {
