@@ -1,7 +1,12 @@
 #!/usr/bin/env groovy
 import java.net.http.*
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZonedDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeFormatterBuilder
+import static java.time.temporal.ChronoField.NANO_OF_SECOND;
 
 @Grab('info.picocli:picocli-groovy:4.5.2')
 @GrabConfig(systemClassLoader=true)
@@ -11,6 +16,7 @@ import java.time.format.DateTimeFormatter
         description = "A command-line tool to fetch all updates to tickets for DSM over a time period")
 @picocli.groovy.PicocliScript
 import static picocli.CommandLine.*
+import static groovy.json.JsonOutput.*
 
 import groovy.json.JsonSlurper
 import groovy.json.JsonOutput
@@ -25,6 +31,9 @@ import groovy.transform.Field
 
 @Option(names = ["-p", "--password"], description = 'The JIRA password, defaults to $PASSWORD. Required')
 @Field String password = System.getenv().PASSWORD
+
+@Option(names = ["-d", "--daysBack"], description = 'Days back to look for issue changes', required = true)
+@Field Integer daysBack
 
 class AuthHolder {
   static def instance
@@ -83,6 +92,31 @@ try {
   http '/mypermissions'
 
   println "Authentication success!"
+
+  def request = [:]
+  request.jql = "category = DSM AND type in (\"user story\", bug, task) AND updated > -${daysBack}d AND \"Feature Link\" is EMPTY"
+  request.startAt = 0
+  request.maxResults = 1
+  request.fields = [ 'key', 'summary', 'UGBU Scrum Team' ]
+  request.expand = [ 'changelog' ]
+
+  final Instant dateFilter = LocalDate.now().minusDays(daysBack).atStartOfDay(ZoneId.systemDefault()).toInstant()
+  final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSZ")
+
+  def issuesNoFeature = http '/search', 'POST', HttpRequest.BodyPublishers.ofString("${toJson(request)}")
+
+  println 'Results found: ${issuesNoFeatures.total}'
+
+  def results = issuesNoFeature.issues.collect { issue ->
+    def result = [:]
+    result.key = =issue.key
+    result.summary = issue.fields.summary
+    result.history = issue.changelog.histories.findAll { entry -> ZonedDateTime.parse(entry.created, formatter).toInstant() > dateFilter }
+    return result
+  }
+
+  println "history entries: ${prettyPrint(toJson(results))}"
+
 }
 catch (Exception e) {
   println "${e.message}"
