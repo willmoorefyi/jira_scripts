@@ -74,6 +74,8 @@ def http(path, method="GET", requestBody=null) {
       ."${method}"(*args)
       .build()
 
+  println "executing request ${request}"
+
   HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString())
 
   if(!response.statusCode() || response.statusCode() > 299 ) {
@@ -93,58 +95,60 @@ try {
 
   println "Authentication success!"
 
+  final Integer maxResults = 1
   // TODO look up custom field for "UGBU Scrum Team"
   final String scrumTeamFieldName = 'customfield_15751';
 
   def request = [:]
   request.jql = "category = DSM AND type in (\"user story\", bug, task) AND updated > -${daysBack}d AND \"Feature Link\" is EMPTY"
-  request.startAt = 0
-  request.maxResults = 1
+  request.maxResults = maxResults
   request.fields = [ 'key', 'summary', scrumTeamFieldName, 'created', 'comment' ]
   request.expand = [ 'changelog' ]
 
   final Instant dateFilter = LocalDate.now().minusDays(daysBack).atStartOfDay(ZoneId.systemDefault()).toInstant()
   final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSZ")
 
-  def issuesNoFeature = http '/search', 'POST', HttpRequest.BodyPublishers.ofString("${toJson(request)}")
-  def total = issuesNoFeature.total
+  for (Integer startAt = 0, total = maxResults+1; startAt + maxResults < total; startAt += maxResults) {
+    request.startAt = startAt
+    def issuesNoFeature = http '/search', 'POST', HttpRequest.BodyPublishers.ofString("${toJson(request)}")
+    total = issuesNoFeature.total
 
-  println "Results found: ${total}"
+    println "Results found: ${total}"
 
-  def results = issuesNoFeature.issues.collect { issue ->
-    def result = [:]
-    result.key = issue.key
-    result.summary = issue.fields.summary
-    result.created = ZonedDateTime.parse(issue.fields.created, formatter).format(DateTimeFormatter.RFC_1123_DATE_TIME)
-    result.team = issue.fields[scrumTeamFieldName]?.value
-    result.comments = issue.fields.comment?.comments
-      .findAll { entry -> ZonedDateTime.parse(entry.created, formatter).toInstant() > dateFilter }
-      .collect { entry ->
-        def commentEntry = [:]
-        commentEntry.timestamp = ZonedDateTime.parse(entry.created, formatter).format(DateTimeFormatter.RFC_1123_DATE_TIME)
-        commentEntry.author = entry.author.displayName
-        commentEntry.body = entry.body
-        commentEntry
-      }
-    result.history = issue.changelog?.histories
-      .findAll { entry -> ZonedDateTime.parse(entry.created, formatter).toInstant() > dateFilter }
-      .collect { entry -> 
-        def historyEntry = [:]
-        historyEntry.author = entry.displayName
-        historyEntry.timestamp = ZonedDateTime.parse(entry.created, formatter).format(DateTimeFormatter.RFC_1123_DATE_TIME)
-        historyEntry.changes = entry.items.collect { item ->
-          def historyItem = [:]
-          historyItem.field = item.field
-          historyItem.from = item.fromString
-          historyItem.to = item.toString
-          historyItem
+    def results = issuesNoFeature.issues.collect { issue ->
+      def result = [:]
+      result.key = issue.key
+      result.summary = issue.fields.summary
+      result.created = ZonedDateTime.parse(issue.fields.created, formatter).format(DateTimeFormatter.RFC_1123_DATE_TIME)
+      result.team = issue.fields[scrumTeamFieldName]?.value
+      result.comments = issue.fields.comment?.comments
+        .findAll { entry -> ZonedDateTime.parse(entry.created, formatter).toInstant() > dateFilter }
+        .collect { entry ->
+          def commentEntry = [:]
+          commentEntry.timestamp = ZonedDateTime.parse(entry.created, formatter).format(DateTimeFormatter.RFC_1123_DATE_TIME)
+          commentEntry.author = entry.author.displayName
+          commentEntry.body = entry.body
+          commentEntry
         }
-      }
-    result
+      result.history = issue.changelog?.histories
+        .findAll { entry -> ZonedDateTime.parse(entry.created, formatter).toInstant() > dateFilter }
+        .collect { entry -> 
+          def historyEntry = [:]
+          historyEntry.author = entry.displayName
+          historyEntry.timestamp = ZonedDateTime.parse(entry.created, formatter).format(DateTimeFormatter.RFC_1123_DATE_TIME)
+          historyEntry.changes = entry.items.collect { item ->
+            def historyItem = [:]
+            historyItem.field = item.field
+            historyItem.from = item.fromString
+            historyItem.to = item.toString
+            historyItem
+          }
+        }
+      result
+    }
+
+    println "history entries: ${prettyPrint(toJson(results))}"
   }
-
-  println "history entries: ${prettyPrint(toJson(results))}"
-
 }
 catch (Exception e) {
   println "${e.message}"
