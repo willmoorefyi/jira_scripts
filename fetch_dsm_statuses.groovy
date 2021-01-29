@@ -23,6 +23,7 @@ import static groovy.json.JsonOutput.*
 import groovy.json.JsonSlurper
 import groovy.json.JsonOutput
 import groovy.transform.Field
+import groovy.xml.*
 
 @Field final String JIRA_REST_URL = 'https://ticket.opower.com/rest/api/latest'
 @Field final JsonSlurper json = new JsonSlurper()
@@ -97,7 +98,7 @@ try {
 
   println "Authentication success!"
 
-  File outfile = Files.createFile(Paths.get("output/${UUID.randomUUID().toString()}.tsv")).toFile()
+  File outfile = Files.createFile(Paths.get("output/${UUID.randomUUID().toString()}.html")).toFile()
   println "Writing results to file ${outfile.toString()}"
 
   final Integer maxResults = 100
@@ -105,7 +106,7 @@ try {
   final String scrumTeamFieldName = 'customfield_15751';
 
   def request = [:]
-  request.jql = "category = DSM AND type in (\"user story\", bug, task) AND updated > -${daysBack}d AND \"Feature Link\" is EMPTY"
+  request.jql = "category = DSM AND type in (\"user story\", bug, task) AND updated > -${daysBack}d AND \"Feature Link\" is EMPTY order by \"UGBU Scrum Team\" ASC, updated ASC"
   request.maxResults = maxResults
   request.fields = [ 'key', 'summary', 'issuetype', scrumTeamFieldName, 'created', 'comment' ]
   request.expand = [ 'changelog' ]
@@ -126,13 +127,13 @@ try {
       result.key = issue.key
       result.summary = issue.fields.summary
       result.type = issue.fields.issuetype.name
-      result.created = ZonedDateTime.parse(issue.fields.created, formatter).format(DateTimeFormatter.RFC_1123_DATE_TIME)
+      result.created = ZonedDateTime.parse(issue.fields.created, formatter).format(DateTimeFormatter.ISO_LOCAL_DATE )
       result.team = issue.fields[scrumTeamFieldName]?.value
       result.comments = issue.fields.comment?.comments
         .findAll { entry -> ZonedDateTime.parse(entry.created, formatter).toInstant() > dateFilter }
         .collect { entry ->
           def commentEntry = [:]
-          commentEntry.timestamp = ZonedDateTime.parse(entry.created, formatter).format(DateTimeFormatter.RFC_1123_DATE_TIME)
+          commentEntry.timestamp = ZonedDateTime.parse(entry.created, formatter).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME )
           commentEntry.author = entry.author.displayName
           commentEntry.body = entry.body
           commentEntry
@@ -141,8 +142,8 @@ try {
         .findAll { entry -> ZonedDateTime.parse(entry.created, formatter).toInstant() > dateFilter }
         .collect { entry -> 
           def historyEntry = [:]
-          historyEntry.author = entry.displayName
-          historyEntry.timestamp = ZonedDateTime.parse(entry.created, formatter).format(DateTimeFormatter.RFC_1123_DATE_TIME)
+          historyEntry.author = entry.author.displayName
+          historyEntry.timestamp = ZonedDateTime.parse(entry.created, formatter).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME )
           historyEntry.changes = entry.items.collect { item ->
             def historyItem = [:]
             historyItem.field = item.field
@@ -154,22 +155,66 @@ try {
         }
       result
     })
+    //results.sort { result -> result.team }
   }
 
+  //println "history entries: ${prettyPrint(toJson(results))}"
+
   outfile.withWriter('utf-8') { writer ->
-    writer.writeLine 'Issues without Epics'
-    results.each { result ->
-      writer.writeLine "${result.key}\t${result.type}\t${result.created}\t${result.summary}\t${result.team}"
-      result.comments.each { comment ->
-        writer.writeLine "\tcomment:\t${comment.timestamp}\t${comment.author}\t${comment.body}"
+    def builder = new MarkupBuilder(writer)
+    builder.html {
+      head {
+        meta charset: 'utf-8'
+        link href: "https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta1/dist/css/bootstrap.min.css", rel:"stylesheet", integrity:"sha384-giJF6kkoqNQ00vy+HMDP7azOuL0xtbfIcaT9wjKHr8RbDVddVHyTfAAsrekwKmP1", crossorigin:"anonymous"
+        title 'DSM Status'
       }
-      result.history.each { history ->
-        writer << "\thistory:\t${history.timestamp}\t${history.author}\t${history.body}"
-        writer << history.changes.each { change -> "\t${change.field}\t${change.from}\t${change.to}" }.join("\n\t")
+      body(id: 'main') {
+        div(class: 'container') {
+          h1 'Issues without Epics'
+          table(class: 'table table-striped table-hover') {
+            tbody {
+              results.each { result ->
+                tr {
+                  th "${result.key}"
+                  th "${result.type}"
+                  th "${result.created}"
+                  th "${result.summary}"
+                  th "${result.team}"
+                }
+                result.commments.each { comment ->
+                  tr {
+                    td ""
+                    td "comment:"
+                    td "${comment.timestamp}"
+                    td "${comment.author}"
+                    td "${comment.body}"
+                  }
+                }
+                result.history.each { history ->
+                  tr {
+                    td ""
+                    td "history:"
+                    td "${history.timestamp}"
+                    td "${history.author}"
+                    td ""
+                  }
+                  history.changes.each { change ->
+                    tr {
+                      td ""
+                      td ""
+                      td "${change.field}"
+                      td "${change.field == 'description' ? "<body>" : change.from}"
+                      td "${change.field == 'description' ? "<body>" : change.to}"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
   }
-
 }
 catch (Exception e) {
   println "${e.message}"
