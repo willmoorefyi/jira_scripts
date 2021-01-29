@@ -7,6 +7,7 @@ import java.time.ZonedDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeFormatterBuilder
+import java.util.UUID
 import static java.time.temporal.ChronoField.NANO_OF_SECOND;
 
 @Grab('info.picocli:picocli-groovy:4.5.2')
@@ -96,8 +97,8 @@ try {
 
   println "Authentication success!"
 
-  File file = Files.createFile(Paths.get("output/${UUID.randomUUID().toString()}.tsv")).toFile()
-  println "Writing results to file ${file.toString()}"
+  File outfile = Files.createFile(Paths.get("output/${UUID.randomUUID().toString()}.tsv")).toFile()
+  println "Writing results to file ${outfile.toString()}"
 
   final Integer maxResults = 100
   // TODO look up custom field for "UGBU Scrum Team"
@@ -149,13 +150,25 @@ try {
             historyItem.to = item.toString
             historyItem
           }
+          historyEntry
         }
       result
     })
   }
 
-  println "history entries: ${prettyPrint(toJson(results))}"
-
+  outfile.withWriter('utf-8') { writer ->
+    writer.writeLine 'Issues without Epics'
+    results.each { result ->
+      writer.writeLine "${result.key}\t${result.type}\t${result.created}\t${result.summary}\t${result.team}"
+      result.comments.each { comment ->
+        writer.writeLine "\tcomment:\t${comment.timestamp}\t${comment.author}\t${comment.body}"
+      }
+      result.history.each { history ->
+        writer << "\thistory:\t${history.timestamp}\t${history.author}\t${history.body}"
+        writer << history.changes.each { change -> "\t${change.field}\t${change.from}\t${change.to}" }.join("\n\t")
+      }
+    }
+  }
 
 }
 catch (Exception e) {
