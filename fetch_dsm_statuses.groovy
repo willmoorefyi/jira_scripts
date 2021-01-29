@@ -1,5 +1,6 @@
 #!/usr/bin/env groovy
 import java.net.http.*
+import java.nio.file.*
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZonedDateTime
@@ -95,19 +96,23 @@ try {
 
   println "Authentication success!"
 
-  final Integer maxResults = 1
+  File file = Files.createFile(Paths.get("output/${UUID.randomUUID().toString()}.tsv")).toFile()
+  println "Writing results to file ${file.toString()}"
+
+  final Integer maxResults = 100
   // TODO look up custom field for "UGBU Scrum Team"
   final String scrumTeamFieldName = 'customfield_15751';
 
   def request = [:]
   request.jql = "category = DSM AND type in (\"user story\", bug, task) AND updated > -${daysBack}d AND \"Feature Link\" is EMPTY"
   request.maxResults = maxResults
-  request.fields = [ 'key', 'summary', scrumTeamFieldName, 'created', 'comment' ]
+  request.fields = [ 'key', 'summary', 'issuetype', scrumTeamFieldName, 'created', 'comment' ]
   request.expand = [ 'changelog' ]
 
   final Instant dateFilter = LocalDate.now().minusDays(daysBack).atStartOfDay(ZoneId.systemDefault()).toInstant()
   final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSZ")
 
+  def results = []
   for (Integer startAt = 0, total = maxResults+1; startAt + maxResults < total; startAt += maxResults) {
     request.startAt = startAt
     def issuesNoFeature = http '/search', 'POST', HttpRequest.BodyPublishers.ofString("${toJson(request)}")
@@ -115,10 +120,11 @@ try {
 
     println "Results found: ${total}"
 
-    def results = issuesNoFeature.issues.collect { issue ->
+    results.addAll(issuesNoFeature.issues.collect { issue ->
       def result = [:]
       result.key = issue.key
       result.summary = issue.fields.summary
+      result.type = issue.fields.issuetype.name
       result.created = ZonedDateTime.parse(issue.fields.created, formatter).format(DateTimeFormatter.RFC_1123_DATE_TIME)
       result.team = issue.fields[scrumTeamFieldName]?.value
       result.comments = issue.fields.comment?.comments
@@ -145,10 +151,12 @@ try {
           }
         }
       result
-    }
-
-    println "history entries: ${prettyPrint(toJson(results))}"
+    })
   }
+
+  println "history entries: ${prettyPrint(toJson(results))}"
+
+
 }
 catch (Exception e) {
   println "${e.message}"
