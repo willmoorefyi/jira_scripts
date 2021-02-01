@@ -100,45 +100,44 @@ def http(path, method="GET", requestBody=null) {
 
 def parseResults(queryResponse) {
   final Instant dateFilter = LocalDate.now().minusDays(daysBack).atStartOfDay(ZoneId.systemDefault()).toInstant()
-  queryResponse.issues.findResults { issue ->
-      def result = [:]
-      result.key = issue.key
-      result.summary = issue.fields.summary
-      result.type = issue.fields.issuetype.name
-      ZonedDateTime created = ZonedDateTime.parse(issue.fields.created, FORMATTER)
-      result.created = created.format(DateTimeFormatter.ISO_LOCAL_DATE )
-      result.newlyCreated = created.toInstant() > dateFilter
-      result.team = issue.fields[scrumTeamFieldName]?.value
-      result.comments = issue.fields.comment?.comments
-        .findAll { entry -> ZonedDateTime.parse(entry.created, FORMATTER).toInstant() > dateFilter }
-        .collect { entry ->
-          def commentEntry = [:]
-          commentEntry.timestamp = ZonedDateTime.parse(entry.created, FORMATTER).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME )
-          commentEntry.author = entry.author.displayName
-          commentEntry.body = entry.body
-          commentEntry
-        }
-      result.history = issue.changelog?.histories
-        .findResults { entry ->
-          if (ZonedDateTime.parse(entry.created, FORMATTER).toInstant() > dateFilter) {
-            def historyEntry = [:]
-            historyEntry.author = entry.author.displayName
-            historyEntry.timestamp = ZonedDateTime.parse(entry.created, FORMATTER).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME )
-            historyEntry.changes = entry.items.findResults { item ->
-              if (! ['Rank', 'RemoteIssueLink', 'Sprint'].contains(item.field)) {
-                def historyItem = [:]
-                historyItem.field = item.field
-                List<DiffMatchPatch.Diff> diff = DMP.diffMain(item.fromString ?: "", item.toString ?: "");
-                DMP.diffCleanupSemantic(diff)
-                historyItem.diff = DMP.diffPrettyHtml(diff)
-                historyItem
-              }
-            }
-            historyEntry.changes ? historyEntry : null
+  queryResponse.issues.collect { issue ->
+    def result = [:]
+    result.key = issue.key
+    result.summary = issue.fields.summary
+    result.type = issue.fields.issuetype.name
+    ZonedDateTime created = ZonedDateTime.parse(issue.fields.created, FORMATTER)
+    result.created = created.format(DateTimeFormatter.ISO_LOCAL_DATE )
+    result.newlyCreated = created.toInstant() > dateFilter
+    result.team = issue.fields[scrumTeamFieldName]?.value
+    result.comments = issue.fields.comment?.comments
+      .findAll { entry -> ZonedDateTime.parse(entry.created, FORMATTER).toInstant() > dateFilter }
+      .collect { entry ->
+        def commentEntry = [:]
+        commentEntry.timestamp = ZonedDateTime.parse(entry.created, FORMATTER).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME )
+        commentEntry.author = entry.author.displayName
+        commentEntry.body = entry.body
+        commentEntry
+      }
+    result.history = issue.changelog?.histories.findResults { entry ->
+      if (ZonedDateTime.parse(entry.created, FORMATTER).toInstant() > dateFilter) {
+        def historyEntry = [:]
+        historyEntry.author = entry.author.displayName
+        historyEntry.timestamp = ZonedDateTime.parse(entry.created, FORMATTER).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME )
+        historyEntry.changes = entry.items.findResults { item ->
+          if (! ['Rank', 'RemoteIssueLink', 'Sprint'].contains(item.field)) {
+            def historyItem = [:]
+            historyItem.field = item.field
+            List<DiffMatchPatch.Diff> diff = DMP.diffMain(item.fromString ?: "", item.toString ?: "");
+            DMP.diffCleanupSemantic(diff)
+            historyItem.diff = DMP.diffPrettyHtml(diff)
+            historyItem
           }
         }
-        result.newlyCreated || result.comments || result.history ? result : null
+        historyEntry.changes ? historyEntry : null
+      }
     }
+    result
+  }
 }
 
 println "Validating credentials"
@@ -168,7 +167,7 @@ try {
 
     println "Results found: ${total}"
 
-    results.addAll(parseResults(issuesNoFeature))
+    results.addAll(parseResults(issuesNoFeature).findAll { result -> result.newlyCreated || result.comments || result.history })
   }
 
   // println "history entries: ${prettyPrint(toJson(results))}"
