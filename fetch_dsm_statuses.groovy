@@ -33,6 +33,8 @@ import groovy.xml.*
 @Field final DateTimeFormatter JIRA_DATE_TIME_FORMAT = DateTimeFormatter.ofPattern("d/MMM/yy")
 @Field final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSZ")
 @Field final DiffMatchPatch DMP = new DiffMatchPatch()
+
+@Field final Integer MAX_RESULTS = 100
 // TODO look up custom field for "UGBU Scrum Team"
 @Field final String scrumTeamFieldName = 'customfield_15751';
 
@@ -140,6 +142,24 @@ def parseResults(queryResponse) {
   }
 }
 
+def executeJql(String jql, Closure callback) {
+
+  def request = [:]
+  request.jql = jql
+  request.maxResults = MAX_RESULTS
+  request.fields = [ 'key', 'summary', 'issuetype', scrumTeamFieldName, 'created', 'comment' ]
+  request.expand = [ 'changelog' ]
+
+  for (Integer startAt = 0, total = MAX_RESULTS+1; startAt + MAX_RESULTS < total; startAt += MAX_RESULTS) {
+    request.startAt = startAt
+    def response = http '/search', 'POST', HttpRequest.BodyPublishers.ofString("${toJson(request)}")
+    total = response.total
+
+    println "Results found: ${total}"
+    callback(response)
+  }
+}
+
 println "Validating credentials"
 try {
   AuthHolder.initialize(username, password)
@@ -150,28 +170,6 @@ try {
 
   File outfile = Files.createFile(Paths.get("output/${UUID.randomUUID().toString()}.html")).toFile()
   println "Writing results to file ${outfile.toString()}"
-
-  final Integer maxResults = 100
-
-  def request = [:]
-  request.jql = "category = DSM AND type in (\"user story\", bug, task) AND updated > -${daysBack}d AND \"Feature Link\" is EMPTY order by \"UGBU Scrum Team\" ASC, updated ASC"
-  request.maxResults = maxResults
-  request.fields = [ 'key', 'summary', 'issuetype', scrumTeamFieldName, 'created', 'comment' ]
-  request.expand = [ 'changelog' ]
-
-  def results = []
-  for (Integer startAt = 0, total = maxResults+1; startAt + maxResults < total; startAt += maxResults) {
-    request.startAt = startAt
-    def issuesNoFeature = http '/search', 'POST', HttpRequest.BodyPublishers.ofString("${toJson(request)}")
-    total = issuesNoFeature.total
-
-    println "Results found: ${total}"
-
-    results.addAll(parseResults(issuesNoFeature).findAll { result -> result.newlyCreated || result.comments || result.history })
-  }
-
-  // println "history entries: ${prettyPrint(toJson(results))}"
-
   outfile.withWriter('utf-8') { writer ->
     def builder = new MarkupBuilder(writer)
     builder.html {
@@ -182,6 +180,12 @@ try {
       }
       body(id: 'main') {
         div(class: 'container') {
+          String jql = "category = DSM AND type in (\"user story\", bug, task) AND updated > -${daysBack}d AND \"Feature Link\" is EMPTY order by \"UGBU Scrum Team\" ASC, updated ASC"
+          def results = []
+          executeJql jql, { response -> results.addAll(parseResults(response).findAll { result -> result.newlyCreated || result.comments || result.history })}
+
+          //println "history entries: ${prettyPrint(toJson(results))}"
+
           h1 'Issues without Epics'
           table(class: 'table table-hover') {
             tbody {
