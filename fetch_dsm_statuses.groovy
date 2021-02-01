@@ -180,11 +180,23 @@ try {
       }
       body(id: 'main') {
         div(class: 'container') {
-          String jql = "category = DSM AND type in (\"user story\", bug, task) AND updated > -${daysBack}d AND \"Feature Link\" is EMPTY order by \"UGBU Scrum Team\" ASC, updated ASC"
-          def results = []
-          executeJql jql, { response -> results.addAll(parseResults(response).findAll { result -> result.newlyCreated || result.comments || result.history })}
+          def roadmapsJql = "project = DSM and type = \"Group Initiative\" and issueFunction in linkedIssuesOf('category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")')"
+          def roadmaps = []
+          executeJql(roadmapsJql, { response ->
+            roadmaps.addAll(parseResults(response))
+          })
 
-          //println "history entries: ${prettyPrint(toJson(results))}"
+          String issuesNoFeaturesJql = "category = DSM AND type in (\"user story\", bug, task) AND updated > -${daysBack}d AND \"Feature Link\" is EMPTY order by \"UGBU Scrum Team\" ASC, updated ASC"
+          def issuesNoFeatures = []
+          executeJql(issuesNoFeaturesJql, { response ->
+            issuesNoFeatures.addAll(parseResults(response).findAll { result ->
+              result.newlyCreated || result.comments || result.history
+            })
+          })
+
+          def results = roadmaps + issuesNoFeatures
+
+          println "history entries: ${prettyPrint(toJson(results))}"
 
           h1 'Issues without Epics'
           table(class: 'table table-hover') {
