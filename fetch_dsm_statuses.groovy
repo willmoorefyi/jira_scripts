@@ -153,7 +153,7 @@ def executeJql(String jql, Closure callback) {
   request.fields = [ 'key', 'summary', 'issuetype', scrumTeamFieldName, featureLinkFieldName, 'created', 'comment', 'issuelinks' ]
   request.expand = [ 'changelog' ]
 
-  for (Integer startAt = 0, total = MAX_RESULTS+1; startAt + MAX_RESULTS < total; startAt += MAX_RESULTS) {
+  for (Integer startAt = 0, total = 1; startAt < total; startAt += MAX_RESULTS) {
     request.startAt = startAt
     def response = http '/search', 'POST', HttpRequest.BodyPublishers.ofString("${toJson(request)}")
     total = response.total
@@ -216,9 +216,11 @@ try {
             def initiativeKey = feature.links?.find { issueKey -> initiatives.containsKey(issueKey) }
             if (initiativeKey) {
               initiatives[initiativeKey].tickets.add(feature)
+              initiatives[initiativeKey].tickets.addAll(feature.tickets)
             }
             else {
               initiatives['NI'].tickets.add(feature)
+              initiatives['NI'].tickets.addAll(feature.tickets)
             }
           }
 
@@ -235,8 +237,11 @@ try {
             table(class: 'table table-hover') {
               tbody {
                 details.tickets.eachWithIndex { result, idx ->
-                  def rowClass = result.newlyCreated ? 'table-info' : idx %2 ? '' : 'table-secondary'
-                  tr(class: "${rowClass}" ) {
+                  def headerClass = result.newlyCreated ? 'table-info' :
+                    result.type == 'Feature' ? 'table-dark' :
+                    idx %2 ? '' : 'table-secondary'
+                  def rowClass = idx %2 ? '' : 'table-secondary'
+                  tr(class: "${headerClass}" ) {
                     th "${result.key}"
                     th "${result.type}"
                     th "${result.created}"
