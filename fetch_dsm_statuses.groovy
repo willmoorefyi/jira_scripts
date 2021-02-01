@@ -138,6 +138,7 @@ def parseResults(queryResponse) {
         historyEntry.changes ? historyEntry : null
       }
     }
+    result.links = issue.fields.issuelinks.findResults { link -> link.inwardIssue?.key || link.outwardIssue?.key }
     result
   }
 }
@@ -147,7 +148,7 @@ def executeJql(String jql, Closure callback) {
   def request = [:]
   request.jql = jql
   request.maxResults = MAX_RESULTS
-  request.fields = [ 'key', 'summary', 'issuetype', scrumTeamFieldName, 'created', 'comment' ]
+  request.fields = [ 'key', 'summary', 'issuetype', scrumTeamFieldName, 'created', 'comment', 'issuelinks' ]
   request.expand = [ 'changelog' ]
 
   for (Integer startAt = 0, total = MAX_RESULTS+1; startAt + MAX_RESULTS < total; startAt += MAX_RESULTS) {
@@ -181,53 +182,52 @@ try {
       body(id: 'main') {
         div(class: 'container') {
           def roadmapsJql = "project = DSM and type = \"Group Initiative\" and issueFunction in linkedIssuesOf('category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")')"
-          def roadmaps = []
+
+          def results = [:]
           executeJql(roadmapsJql, { response ->
-            roadmaps.addAll(parseResults(response))
+            parseResults(response).each { result -> results.put(result.key, result << [tickets: [] ]) }
           })
 
           String issuesNoFeaturesJql = "category = DSM AND type in (\"user story\", bug, task) AND updated > -${daysBack}d AND \"Feature Link\" is EMPTY order by \"UGBU Scrum Team\" ASC, updated ASC"
-          def issuesNoFeatures = []
+          results.put('NR', [ summary:'Issues without Features', tickets: [] ])
           executeJql(issuesNoFeaturesJql, { response ->
-            issuesNoFeatures.addAll(parseResults(response).findAll { result ->
+            results['NR'].tickets.addAll(parseResults(response).findAll { result ->
               result.newlyCreated || result.comments || result.history
             })
           })
 
-          def results = roadmaps + issuesNoFeatures
-
-          println "history entries: ${prettyPrint(toJson(results))}"
-
-          h1 'Issues without Epics'
-          table(class: 'table table-hover') {
-            tbody {
-              results.eachWithIndex { result, idx ->
-                def rowClass = result.newlyCreated ? 'table-info' : idx %2 ? '' : 'table-secondary'
-                tr(class: "${rowClass}" ) {
-                  th "${result.key}"
-                  th "${result.type}"
-                  th "${result.created}"
-                  th "${result.team}"
-                  th "${result.summary}"
-                }
-                result.comments.each { comment ->
+          results.each { initiative, details ->
+            h3("${initiative}:", {  small(class: 'text-muted', "${details.summary}") })
+            table(class: 'table table-hover') {
+              tbody {
+                details.tickets.eachWithIndex { result, idx ->
+                  def rowClass = result.newlyCreated ? 'table-info' : idx %2 ? '' : 'table-secondary'
                   tr(class: "${rowClass}" ) {
-                    td ""
-                    td "comment:"
-                    td "${comment.timestamp}"
-                    td "${comment.author}"
-                    td "${comment.body}"
+                    th "${result.key}"
+                    th "${result.type}"
+                    th "${result.created}"
+                    th "${result.team}"
+                    th "${result.summary}"
                   }
-                }
-                result.history.each { history ->
-                  history.changes?.each { change ->
+                  result.comments.each { comment ->
                     tr(class: "${rowClass}" ) {
                       td ""
-                      td "history:"
-                      td "${history.timestamp}"
-                      td "${history.author}: ${change.field}"
-                      td {
-                        mkp.yieldUnescaped "${change.diff}"
+                      td "comment:"
+                      td "${comment.timestamp}"
+                      td "${comment.author}"
+                      td "${comment.body}"
+                    }
+                  }
+                  result.history.each { history ->
+                    history.changes?.each { change ->
+                      tr(class: "${rowClass}" ) {
+                        td ""
+                        td "history:"
+                        td "${history.timestamp}"
+                        td "${history.author}: ${change.field}"
+                        td {
+                          mkp.yieldUnescaped "${change.diff}"
+                        }
                       }
                     }
                   }
