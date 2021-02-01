@@ -30,8 +30,12 @@ import groovy.xml.*
 
 @Field final String JIRA_REST_URL = 'https://ticket.opower.com/rest/api/latest'
 @Field final JsonSlurper json = new JsonSlurper()
-@Field final DateTimeFormatter jiraDateTimeFormat = DateTimeFormatter.ofPattern("d/MMM/yy")
+@Field final DateTimeFormatter JIRA_DATE_TIME_FORMAT = DateTimeFormatter.ofPattern("d/MMM/yy")
+@Field final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSZ")
 @Field final DiffMatchPatch DMP = new DiffMatchPatch()
+// TODO look up custom field for "UGBU Scrum Team"
+@Field final String scrumTeamFieldName = 'customfield_15751';
+
 
 @Option(names = ["-u", "--user"], description = 'The JIRA Username, defaults to $USERNAME. Required')
 @Field String username = System.getenv().USERNAME
@@ -94,6 +98,49 @@ def http(path, method="GET", requestBody=null) {
   json.parseText response.body()
 }
 
+def parseResults(queryResponse) {
+  final Instant dateFilter = LocalDate.now().minusDays(daysBack).atStartOfDay(ZoneId.systemDefault()).toInstant()
+  queryResponse.issues.findResults { issue ->
+      def result = [:]
+      result.key = issue.key
+      result.summary = issue.fields.summary
+      result.type = issue.fields.issuetype.name
+      ZonedDateTime created = ZonedDateTime.parse(issue.fields.created, FORMATTER)
+      result.created = created.format(DateTimeFormatter.ISO_LOCAL_DATE )
+      result.newlyCreated = created.toInstant() > dateFilter
+      result.team = issue.fields[scrumTeamFieldName]?.value
+      result.comments = issue.fields.comment?.comments
+        .findAll { entry -> ZonedDateTime.parse(entry.created, FORMATTER).toInstant() > dateFilter }
+        .collect { entry ->
+          def commentEntry = [:]
+          commentEntry.timestamp = ZonedDateTime.parse(entry.created, FORMATTER).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME )
+          commentEntry.author = entry.author.displayName
+          commentEntry.body = entry.body
+          commentEntry
+        }
+      result.history = issue.changelog?.histories
+        .findResults { entry ->
+          if (ZonedDateTime.parse(entry.created, FORMATTER).toInstant() > dateFilter) {
+            def historyEntry = [:]
+            historyEntry.author = entry.author.displayName
+            historyEntry.timestamp = ZonedDateTime.parse(entry.created, FORMATTER).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME )
+            historyEntry.changes = entry.items.findResults { item ->
+              if (! ['Rank', 'RemoteIssueLink', 'Sprint'].contains(item.field)) {
+                def historyItem = [:]
+                historyItem.field = item.field
+                List<DiffMatchPatch.Diff> diff = DMP.diffMain(item.fromString ?: "", item.toString ?: "");
+                DMP.diffCleanupSemantic(diff)
+                historyItem.diff = DMP.diffPrettyHtml(diff)
+                historyItem
+              }
+            }
+            historyEntry.changes ? historyEntry : null
+          }
+        }
+        result.newlyCreated || result.comments || result.history ? result : null
+    }
+}
+
 println "Validating credentials"
 try {
   AuthHolder.initialize(username, password)
@@ -106,17 +153,12 @@ try {
   println "Writing results to file ${outfile.toString()}"
 
   final Integer maxResults = 100
-  // TODO look up custom field for "UGBU Scrum Team"
-  final String scrumTeamFieldName = 'customfield_15751';
 
   def request = [:]
   request.jql = "category = DSM AND type in (\"user story\", bug, task) AND updated > -${daysBack}d AND \"Feature Link\" is EMPTY order by \"UGBU Scrum Team\" ASC, updated ASC"
   request.maxResults = maxResults
   request.fields = [ 'key', 'summary', 'issuetype', scrumTeamFieldName, 'created', 'comment' ]
   request.expand = [ 'changelog' ]
-
-  final Instant dateFilter = LocalDate.now().minusDays(daysBack).atStartOfDay(ZoneId.systemDefault()).toInstant()
-  final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSZ")
 
   def results = []
   for (Integer startAt = 0, total = maxResults+1; startAt + maxResults < total; startAt += maxResults) {
@@ -126,49 +168,7 @@ try {
 
     println "Results found: ${total}"
 
-    results.addAll(issuesNoFeature.issues.findResults { issue ->
-      def result = [:]
-      result.key = issue.key
-      result.summary = issue.fields.summary
-      result.type = issue.fields.issuetype.name
-      ZonedDateTime created = ZonedDateTime.parse(issue.fields.created, formatter)
-      result.created = created.format(DateTimeFormatter.ISO_LOCAL_DATE )
-      result.newlyCreated = created.toInstant() > dateFilter
-      result.team = issue.fields[scrumTeamFieldName]?.value
-      result.comments = issue.fields.comment?.comments
-        .findAll { entry -> ZonedDateTime.parse(entry.created, formatter).toInstant() > dateFilter }
-        .collect { entry ->
-          def commentEntry = [:]
-          commentEntry.timestamp = ZonedDateTime.parse(entry.created, formatter).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME )
-          commentEntry.author = entry.author.displayName
-          commentEntry.body = entry.body
-          commentEntry
-        }
-      result.history = issue.changelog?.histories
-        .findResults { entry ->
-          if (ZonedDateTime.parse(entry.created, formatter).toInstant() > dateFilter) {
-            def historyEntry = [:]
-            historyEntry.author = entry.author.displayName
-            historyEntry.timestamp = ZonedDateTime.parse(entry.created, formatter).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME )
-            historyEntry.changes = entry.items.findResults { item ->
-              if (! ['Rank', 'RemoteIssueLink', 'Sprint'].contains(item.field)) {
-                def historyItem = [:]
-                historyItem.field = item.field
-                historyItem.from = item.fromString
-                historyItem.to = item.toString
-                List<DiffMatchPatch.Diff> diff = DMP.diffMain(historyItem.from ?: "", historyItem.to ?: "");
-                DMP.diffCleanupSemantic(diff)
-                historyItem.diff = DMP.diffPrettyHtml(diff)
-                historyItem
-              }
-            }
-            if (historyEntry.changes) {
-              historyEntry
-            }
-          }
-        }
-        result.newlyCreated || result.comments || result.history ? result : null
-    })
+    results.addAll(parseResults(issuesNoFeature))
   }
 
   // println "history entries: ${prettyPrint(toJson(results))}"
