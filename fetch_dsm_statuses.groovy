@@ -112,20 +112,20 @@ def parseResults(queryResponse) {
     result.created = created.format(DateTimeFormatter.ISO_LOCAL_DATE )
     result.newlyCreated = created.toInstant() > dateFilter
     result.team = issue.fields[scrumTeamFieldName]?.value
-    result.feature = issue.fields[featureLinkFieldName]?.value
+    result.feature = issue.fields[featureLinkFieldName]
     result.comments = issue.fields.comment?.comments
       .findAll { entry -> ZonedDateTime.parse(entry.created, FORMATTER).toInstant() > dateFilter }
       .collect { entry ->
         def commentEntry = [:]
         commentEntry.timestamp = ZonedDateTime.parse(entry.created, FORMATTER).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME )
-        commentEntry.author = entry.author.displayName
+        commentEntry.author = entry.author?.displayName
         commentEntry.body = entry.body
         commentEntry
       }
     result.history = issue.changelog?.histories.findResults { entry ->
       if (ZonedDateTime.parse(entry.created, FORMATTER).toInstant() > dateFilter) {
         def historyEntry = [:]
-        historyEntry.author = entry.author.displayName
+        historyEntry.author = entry.author?.displayName
         historyEntry.timestamp = ZonedDateTime.parse(entry.created, FORMATTER).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME )
         historyEntry.changes = entry.items.findResults { item ->
           if (! ['Rank', 'RemoteIssueLink', 'Sprint'].contains(item.field)) {
@@ -196,6 +196,18 @@ try {
           def features = [:]
           executeJql(featureJql, { response ->
             parseResults(response).each { result -> features.put(result.key, result << [tickets: [] ]) }
+          })
+
+          def issuesWithFeaturesJql = "category = DSM AND type in (\"user story\", bug, task) AND updated > -${daysBack}d AND \"Feature Link\" is NOT EMPTY order by \"UGBU Scrum Team\" ASC, updated ASC"
+          executeJql(issuesWithFeaturesJql, { response ->
+            parseResults(response).each { issue ->
+              if (features.containsKey(issue.feature)) {
+                features[issue.feature].tickets.add(issue)
+              }
+              else {
+                println "found issue ${issue.key} with no associated feature ${issue.feature}!"
+              }
+            }
           })
 
           // map features to roadmaps
