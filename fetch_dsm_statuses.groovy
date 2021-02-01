@@ -35,8 +35,9 @@ import groovy.xml.*
 @Field final DiffMatchPatch DMP = new DiffMatchPatch()
 
 @Field final Integer MAX_RESULTS = 100
-// TODO look up custom field for "UGBU Scrum Team"
-@Field final String scrumTeamFieldName = 'customfield_15751';
+// TODO look up custom field for "UGBU Scrum Team" and "Feature Link"
+@Field final String scrumTeamFieldName = 'customfield_15751'
+@Field final String featureLinkFieldName = 'customfield_13258'
 
 
 @Option(names = ["-u", "--user"], description = 'The JIRA Username, defaults to $USERNAME. Required')
@@ -111,6 +112,7 @@ def parseResults(queryResponse) {
     result.created = created.format(DateTimeFormatter.ISO_LOCAL_DATE )
     result.newlyCreated = created.toInstant() > dateFilter
     result.team = issue.fields[scrumTeamFieldName]?.value
+    result.feature = issue.fields[featureLinkFieldName]?.value
     result.comments = issue.fields.comment?.comments
       .findAll { entry -> ZonedDateTime.parse(entry.created, FORMATTER).toInstant() > dateFilter }
       .collect { entry ->
@@ -138,7 +140,7 @@ def parseResults(queryResponse) {
         historyEntry.changes ? historyEntry : null
       }
     }
-    result.links = issue.fields.issuelinks.findResults { link -> link.inwardIssue?.key || link.outwardIssue?.key }
+    result.links = issue.fields.issuelinks.findResults { link -> link.inwardIssue?.key ?: link.outwardIssue?.key }
     result
   }
 }
@@ -148,7 +150,7 @@ def executeJql(String jql, Closure callback) {
   def request = [:]
   request.jql = jql
   request.maxResults = MAX_RESULTS
-  request.fields = [ 'key', 'summary', 'issuetype', scrumTeamFieldName, 'created', 'comment', 'issuelinks' ]
+  request.fields = [ 'key', 'summary', 'issuetype', scrumTeamFieldName, featureLinkFieldName, 'created', 'comment', 'issuelinks' ]
   request.expand = [ 'changelog' ]
 
   for (Integer startAt = 0, total = MAX_RESULTS+1; startAt + MAX_RESULTS < total; startAt += MAX_RESULTS) {
@@ -183,21 +185,41 @@ try {
         div(class: 'container') {
           def roadmapsJql = "project = DSM and type = \"Group Initiative\" and issueFunction in linkedIssuesOf('category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")')"
 
-          def results = [:]
+          // get initiatives that have updated tickets in the past X days
+          def initiatives = [:]
           executeJql(roadmapsJql, { response ->
-            parseResults(response).each { result -> results.put(result.key, result << [tickets: [] ]) }
+            parseResults(response).each { result -> initiatives.put(result.key, result << [tickets: [] ]) }
           })
 
+          // get features that have updated tickets in the past X days
+          def featureJql = "category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")"
+          def features = [:]
+          executeJql(featureJql, { response ->
+            parseResults(response).each { result -> features.put(result.key, result << [tickets: [] ]) }
+          })
+
+          // map features to roadmaps
+          initiatives.put('NI', [ summary:'Features without Initiatives', tickets: [] ])
+          features.each { key, feature ->
+            def initiativeKey = feature.links?.find { issueKey -> initiatives.containsKey(issueKey) }
+            if (initiativeKey) {
+              initiatives[initiativeKey].tickets.add(feature)
+            }
+            else {
+              initiatives['NI'].tickets.add(feature)
+            }
+          }
+
           String issuesNoFeaturesJql = "category = DSM AND type in (\"user story\", bug, task) AND updated > -${daysBack}d AND \"Feature Link\" is EMPTY order by \"UGBU Scrum Team\" ASC, updated ASC"
-          results.put('NR', [ summary:'Issues without Features', tickets: [] ])
+          initiatives.put('NF', [ summary:'Issues without Features', tickets: [] ])
           executeJql(issuesNoFeaturesJql, { response ->
-            results['NR'].tickets.addAll(parseResults(response).findAll { result ->
+            initiatives['NF'].tickets.addAll(parseResults(response).findAll { result ->
               result.newlyCreated || result.comments || result.history
             })
           })
 
-          results.each { initiative, details ->
-            h3("${initiative}:", {  small(class: 'text-muted', "${details.summary}") })
+          initiatives.each { key, details ->
+            h3("${key}:", {  small(class: 'text-muted', "${details.summary}") })
             table(class: 'table table-hover') {
               tbody {
                 details.tickets.eachWithIndex { result, idx ->
