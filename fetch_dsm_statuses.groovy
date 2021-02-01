@@ -10,6 +10,9 @@ import java.time.format.DateTimeFormatterBuilder
 import java.util.UUID
 import static java.time.temporal.ChronoField.NANO_OF_SECOND;
 
+@Grab(group='org.bitbucket.cowwoc', module='diff-match-patch', version='1.2')
+import org.bitbucket.cowwoc.diffmatchpatch.DiffMatchPatch
+
 @Grab('info.picocli:picocli-groovy:4.5.2')
 @GrabConfig(systemClassLoader=true)
 @Command(name = "create_update_version",
@@ -28,6 +31,7 @@ import groovy.xml.*
 @Field final String JIRA_REST_URL = 'https://ticket.opower.com/rest/api/latest'
 @Field final JsonSlurper json = new JsonSlurper()
 @Field final DateTimeFormatter jiraDateTimeFormat = DateTimeFormatter.ofPattern("d/MMM/yy")
+@Field final DiffMatchPatch DMP = new DiffMatchPatch()
 
 @Option(names = ["-u", "--user"], description = 'The JIRA Username, defaults to $USERNAME. Required')
 @Field String username = System.getenv().USERNAME
@@ -122,12 +126,14 @@ try {
 
     println "Results found: ${total}"
 
-    results.addAll(issuesNoFeature.issues.collect { issue ->
+    results.addAll(issuesNoFeature.issues.findResults { issue ->
       def result = [:]
       result.key = issue.key
       result.summary = issue.fields.summary
       result.type = issue.fields.issuetype.name
-      result.created = ZonedDateTime.parse(issue.fields.created, formatter).format(DateTimeFormatter.ISO_LOCAL_DATE )
+      ZonedDateTime created = ZonedDateTime.parse(issue.fields.created, formatter)
+      result.created = created.format(DateTimeFormatter.ISO_LOCAL_DATE )
+      result.newlyCreated = created.toInstant() > dateFilter
       result.team = issue.fields[scrumTeamFieldName]?.value
       result.comments = issue.fields.comment?.comments
         .findAll { entry -> ZonedDateTime.parse(entry.created, formatter).toInstant() > dateFilter }
@@ -139,26 +145,33 @@ try {
           commentEntry
         }
       result.history = issue.changelog?.histories
-        .findAll { entry -> ZonedDateTime.parse(entry.created, formatter).toInstant() > dateFilter }
-        .collect { entry -> 
-          def historyEntry = [:]
-          historyEntry.author = entry.author.displayName
-          historyEntry.timestamp = ZonedDateTime.parse(entry.created, formatter).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME )
-          historyEntry.changes = entry.items.collect { item ->
-            def historyItem = [:]
-            historyItem.field = item.field
-            historyItem.from = item.fromString
-            historyItem.to = item.toString
-            historyItem
+        .findResults { entry ->
+          if (ZonedDateTime.parse(entry.created, formatter).toInstant() > dateFilter) {
+            def historyEntry = [:]
+            historyEntry.author = entry.author.displayName
+            historyEntry.timestamp = ZonedDateTime.parse(entry.created, formatter).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME )
+            historyEntry.changes = entry.items.findResults { item ->
+              if (! ['Rank', 'RemoteIssueLink', 'Sprint'].contains(item.field)) {
+                def historyItem = [:]
+                historyItem.field = item.field
+                historyItem.from = item.fromString
+                historyItem.to = item.toString
+                List<DiffMatchPatch.Diff> diff = DMP.diffMain(historyItem.from ?: "", historyItem.to ?: "");
+                DMP.diffCleanupSemantic(diff)
+                historyItem.diff = DMP.diffPrettyHtml(diff)
+                historyItem
+              }
+            }
+            if (historyEntry.changes) {
+              historyEntry
+            }
           }
-          historyEntry
         }
-      result
+        result.newlyCreated || result.comments || result.history ? result : null
     })
-    //results.sort { result -> result.team }
   }
 
-  //println "history entries: ${prettyPrint(toJson(results))}"
+  // println "history entries: ${prettyPrint(toJson(results))}"
 
   outfile.withWriter('utf-8') { writer ->
     def builder = new MarkupBuilder(writer)
@@ -171,18 +184,19 @@ try {
       body(id: 'main') {
         div(class: 'container') {
           h1 'Issues without Epics'
-          table(class: 'table table-striped table-hover') {
+          table(class: 'table table-hover') {
             tbody {
-              results.each { result ->
-                tr {
+              results.eachWithIndex { result, idx ->
+                def rowClass = result.newlyCreated ? 'table-info' : idx %2 ? '' : 'table-secondary'
+                tr(class: "${rowClass}" ) {
                   th "${result.key}"
                   th "${result.type}"
                   th "${result.created}"
-                  th "${result.summary}"
                   th "${result.team}"
+                  th "${result.summary}"
                 }
-                result.commments.each { comment ->
-                  tr {
+                result.comments.each { comment ->
+                  tr(class: "${rowClass}" ) {
                     td ""
                     td "comment:"
                     td "${comment.timestamp}"
@@ -191,20 +205,15 @@ try {
                   }
                 }
                 result.history.each { history ->
-                  tr {
-                    td ""
-                    td "history:"
-                    td "${history.timestamp}"
-                    td "${history.author}"
-                    td ""
-                  }
-                  history.changes.each { change ->
-                    tr {
+                  history.changes?.each { change ->
+                    tr(class: "${rowClass}" ) {
                       td ""
-                      td ""
-                      td "${change.field}"
-                      td "${change.field == 'description' ? "<body>" : change.from}"
-                      td "${change.field == 'description' ? "<body>" : change.to}"
+                      td "history:"
+                      td "${history.timestamp}"
+                      td "${history.author}: ${change.field}"
+                      td {
+                        mkp.yieldUnescaped "${change.diff}"
+                      }
                     }
                   }
                 }
