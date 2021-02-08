@@ -15,7 +15,7 @@ import org.bitbucket.cowwoc.diffmatchpatch.DiffMatchPatch
 
 @Grab('info.picocli:picocli-groovy:4.5.2')
 @GrabConfig(systemClassLoader=true)
-@Command(name = "create_update_version",
+@Command(name = "fetch_dsm_status",
         version = "0.0.1",
         mixinStandardHelpOptions = true, // add --help and --version options
         description = "A command-line tool to fetch all updates to tickets for DSM over a time period")
@@ -39,15 +39,29 @@ import groovy.xml.*
 @Field final String scrumTeamFieldName = 'customfield_15751'
 @Field final String featureLinkFieldName = 'customfield_13258'
 
-
 @Option(names = ["-u", "--user"], description = 'The JIRA Username, defaults to $USERNAME. Required')
 @Field String username = System.getenv().USERNAME
 
 @Option(names = ["-p", "--password"], description = 'The JIRA password, defaults to $PASSWORD. Required')
 @Field String password = System.getenv().PASSWORD
 
+@Option(names = ["-m", "--mode"], description = 'Execution mode for this program, or granularity of data that is retrieved. Default is "stories"')
+@Field Mode mode = Mode.STORIES
+
 @Option(names = ["-d", "--daysBack"], description = 'Days back to look for issue changes', required = true)
 @Field Integer daysBack
+
+enum Mode {
+  STORIES("stories"),
+  FEATURES("features"),
+  INITIATIVES("initiatives"),
+  ROADMAPS("roadmaps")
+
+  final String text
+  Mode(String text) {
+    this.text = text
+  }
+}
 
 class AuthHolder {
   static def instance
@@ -101,10 +115,10 @@ def http(path, method="GET", requestBody=null) {
   json.parseText response.body()
 }
 
-def createFile(Integer daysBack) {
+def createFile(String classifier, Integer daysBack) {
   final DateTimeFormatter formatter = DateTimeFormatter.BASIC_ISO_DATE
   final String fileName = """
-      output/${formatter.format(LocalDate.now())}_${formatter.format(LocalDate.now().minusDays(daysBack))}_${UUID.randomUUID().toString()}.html
+      output/${classifier}_${formatter.format(LocalDate.now())}_${formatter.format(LocalDate.now().minusDays(daysBack))}_${UUID.randomUUID().toString()}.html
     """.trim()
   Files.createFile(Paths.get(fileName)).toFile()
 }
@@ -136,7 +150,7 @@ def parseResults(queryResponse) {
         historyEntry.author = entry.author?.displayName
         historyEntry.timestamp = ZonedDateTime.parse(entry.created, FORMATTER).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME )
         historyEntry.changes = entry.items.findResults { item ->
-          if (! ['Rank', 'RemoteIssueLink', 'Sprint'].contains(item.field)) {
+          if (! ['Rank', 'RemoteIssueLink', 'Sprint', 'Committed Fix Version'].contains(item.field)) {
             def historyItem = [:]
             historyItem.field = item.field
             List<DiffMatchPatch.Diff> diff = DMP.diffMain(item.fromString ?: "", item.toString ?: "");
@@ -179,7 +193,7 @@ try {
 
   println "Authentication success!"
 
-  File outfile = createFile(daysBack)
+  File outfile = createFile(mode.text, daysBack)
   println "Writing results to file ${outfile.toString()}"
   outfile.withWriter('utf-8') { writer ->
     def builder = new MarkupBuilder(writer)
