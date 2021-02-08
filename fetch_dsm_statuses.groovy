@@ -101,6 +101,14 @@ def http(path, method="GET", requestBody=null) {
   json.parseText response.body()
 }
 
+def createFile(Integer daysBack) {
+  final DateTimeFormatter formatter = DateTimeFormatter.BASIC_ISO_DATE
+  final String fileName = """
+      output/${formatter.format(LocalDate.now())}_${formatter.format(LocalDate.now().minusDays(daysBack))}_${UUID.randomUUID().toString()}.html
+    """.trim()
+  Files.createFile(Paths.get(fileName)).toFile()
+}
+
 def parseResults(queryResponse) {
   final Instant dateFilter = LocalDate.now().minusDays(daysBack).atStartOfDay(ZoneId.systemDefault()).toInstant()
   queryResponse.issues.collect { issue ->
@@ -171,7 +179,7 @@ try {
 
   println "Authentication success!"
 
-  File outfile = Files.createFile(Paths.get("output/${UUID.randomUUID().toString()}.html")).toFile()
+  File outfile = createFile(daysBack)
   println "Writing results to file ${outfile.toString()}"
   outfile.withWriter('utf-8') { writer ->
     def builder = new MarkupBuilder(writer)
@@ -200,7 +208,7 @@ try {
 
           def issuesWithFeaturesJql = "category = DSM AND type in (\"user story\", bug, task) AND updated > -${daysBack}d AND \"Feature Link\" is NOT EMPTY order by \"UGBU Scrum Team\" ASC, updated ASC"
           executeJql(issuesWithFeaturesJql, { response ->
-            parseResults(response).each { issue ->
+            parseResults(response).findAll { result -> result.newlyCreated || result.comments || result.history }.each { issue ->
               if (features.containsKey(issue.feature)) {
                 features[issue.feature].tickets.add(issue)
               }
@@ -242,7 +250,9 @@ try {
                     idx %2 ? '' : 'table-secondary'
                   def rowClass = idx %2 ? '' : 'table-secondary'
                   tr(class: "${headerClass}" ) {
-                    th "${result.key}"
+                    th {
+                      a(href: "https://ticket.opower.com/browse/${result.key}", target: '_blank', "${result.key}")
+                    }
                     th "${result.type}"
                     th "${result.created}"
                     th "${result.team}"
