@@ -185,15 +185,7 @@ def executeJql(String jql, Closure callback) {
   }
 }
 
-println "Validating credentials"
-try {
-  AuthHolder.initialize(username, password)
-
-  http '/mypermissions'
-
-  println "Authentication success!"
-
-  File outfile = createFile(mode.text, daysBack)
+def buildHtml(File outfile, def topLevel) {
   println "Writing results to file ${outfile.toString()}"
   outfile.withWriter('utf-8') { writer ->
     def builder = new MarkupBuilder(writer)
@@ -205,56 +197,7 @@ try {
       }
       body(id: 'main') {
         div(class: 'container') {
-          def roadmapsJql = "project = DSM and type = \"Group Initiative\" and issueFunction in linkedIssuesOf('category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")')"
-
-          // get initiatives that have updated tickets in the past X days
-          def initiatives = [:]
-          executeJql(roadmapsJql, { response ->
-            parseResults(response).each { result -> initiatives.put(result.key, result << [tickets: [] ]) }
-          })
-
-          // get features that have updated tickets in the past X days
-          def featureJql = "category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")"
-          def features = [:]
-          executeJql(featureJql, { response ->
-            parseResults(response).each { result -> features.put(result.key, result << [tickets: [] ]) }
-          })
-
-          def issuesWithFeaturesJql = "category = DSM AND type in (\"user story\", bug, task) AND updated > -${daysBack}d AND \"Feature Link\" is NOT EMPTY order by \"UGBU Scrum Team\" ASC, updated ASC"
-          executeJql(issuesWithFeaturesJql, { response ->
-            parseResults(response).findAll { result -> result.newlyCreated || result.comments || result.history }.each { issue ->
-              if (features.containsKey(issue.feature)) {
-                features[issue.feature].tickets.add(issue)
-              }
-              else {
-                println "found issue ${issue.key} with no associated feature ${issue.feature}!"
-              }
-            }
-          })
-
-          // map features to roadmaps
-          initiatives.put('NI', [ summary:'Features without Initiatives', tickets: [] ])
-          features.each { key, feature ->
-            def initiativeKey = feature.links?.find { issueKey -> initiatives.containsKey(issueKey) }
-            if (initiativeKey) {
-              initiatives[initiativeKey].tickets.add(feature)
-              initiatives[initiativeKey].tickets.addAll(feature.tickets)
-            }
-            else {
-              initiatives['NI'].tickets.add(feature)
-              initiatives['NI'].tickets.addAll(feature.tickets)
-            }
-          }
-
-          String issuesNoFeaturesJql = "category = DSM AND type in (\"user story\", bug, task) AND updated > -${daysBack}d AND \"Feature Link\" is EMPTY order by \"UGBU Scrum Team\" ASC, updated ASC"
-          initiatives.put('NF', [ summary:'Issues without Features', tickets: [] ])
-          executeJql(issuesNoFeaturesJql, { response ->
-            initiatives['NF'].tickets.addAll(parseResults(response).findAll { result ->
-              result.newlyCreated || result.comments || result.history
-            })
-          })
-
-          initiatives.each { key, details ->
+          topLevel.each { key, details ->
             h3("${key}:", {  small(class: 'text-muted', "${details.summary}") })
             table(class: 'table table-hover') {
               tbody {
@@ -302,6 +245,67 @@ try {
       }
     }
   }
+}
+
+println "Validating credentials"
+try {
+  AuthHolder.initialize(username, password)
+
+  http '/mypermissions'
+
+  println "Authentication success!"
+
+  def roadmapsJql = "project = DSM and type = \"Group Initiative\" and issueFunction in linkedIssuesOf('category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")')"
+
+  // get initiatives that have updated tickets in the past X days
+  def initiatives = [:]
+  executeJql(roadmapsJql, { response ->
+    parseResults(response).each { result -> initiatives.put(result.key, result << [tickets: [] ]) }
+  })
+
+  // get features that have updated tickets in the past X days
+  def featureJql = "category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")"
+  def features = [:]
+  executeJql(featureJql, { response ->
+    parseResults(response).each { result -> features.put(result.key, result << [tickets: [] ]) }
+  })
+
+  def issuesWithFeaturesJql = "category = DSM AND type in (\"user story\", bug, task) AND updated > -${daysBack}d AND \"Feature Link\" is NOT EMPTY order by \"UGBU Scrum Team\" ASC, updated ASC"
+  executeJql(issuesWithFeaturesJql, { response ->
+    parseResults(response).findAll { result -> result.newlyCreated || result.comments || result.history }.each { issue ->
+      if (features.containsKey(issue.feature)) {
+        features[issue.feature].tickets.add(issue)
+      }
+      else {
+        println "found issue ${issue.key} with no associated feature ${issue.feature}!"
+      }
+    }
+  })
+
+  // map features to roadmaps
+  initiatives.put('NI', [ summary:'Features without Initiatives', tickets: [] ])
+  features.each { key, feature ->
+    def initiativeKey = feature.links?.find { issueKey -> initiatives.containsKey(issueKey) }
+    if (initiativeKey) {
+      initiatives[initiativeKey].tickets.add(feature)
+      initiatives[initiativeKey].tickets.addAll(feature.tickets)
+    }
+    else {
+      initiatives['NI'].tickets.add(feature)
+      initiatives['NI'].tickets.addAll(feature.tickets)
+    }
+  }
+
+  String issuesNoFeaturesJql = "category = DSM AND type in (\"user story\", bug, task) AND updated > -${daysBack}d AND \"Feature Link\" is EMPTY order by \"UGBU Scrum Team\" ASC, updated ASC"
+  initiatives.put('NF', [ summary:'Issues without Features', tickets: [] ])
+  executeJql(issuesNoFeaturesJql, { response ->
+    initiatives['NF'].tickets.addAll(parseResults(response).findAll { result ->
+      result.newlyCreated || result.comments || result.history
+    })
+  })
+
+  File outfile = createFile(mode.text, daysBack)
+  buildHtml outfile, initiatives
 }
 catch (Exception e) {
   println "${e.message}"
