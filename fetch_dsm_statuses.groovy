@@ -187,6 +187,61 @@ def executeJql(String jql, Closure callback) {
   }
 }
 
+def buildHeader(MarkupBuilder mb, Map elem, String headerBlock) {
+  def statusClass = ['Done', 'Cancelled', 'Closed'].contains(elem.status) ? 'text-success'
+    : ['Launching', 'Ready for Launch'].contains(elem.status) ? 'text-warning' : 'text-info'
+  mb.div(class: 'row') {
+    div(class: 'col-12') {
+      mb."${headerBlock}" {
+        a(href: "https://ticket.opower.com/browse/${elem.key}", target: '_blank', "${elem.key}")
+        span(class: statusClass, elem.status)
+        small(class: 'text-muted', elem.summary)
+      }
+    }
+  }
+  if (elem.due) {
+    mb.div(class: 'row justify-content-end') {
+      div(class: 'col-3') {
+        h5 "Due: ${elem.due}"
+      }
+    }
+  }
+}
+
+def writeTicketRow(MarkupBuilder mb, Map elem, String headerClass, String rowClass) {
+  mb.tr(class: "${headerClass}" ) {
+    th {
+      a(href: "https://ticket.opower.com/browse/${elem.key}", target: '_blank', "${elem.key}")
+    }
+    th "${elem.type}"
+    th "${elem.created}"
+    th "${elem.team}"
+    th "${elem.summary}"
+  }
+  elem.comments.each { comment ->
+    mb.tr(class: "${rowClass}" ) {
+      td ""
+      td "comment:"
+      td "${comment.timestamp}"
+      td "${comment.author}"
+      td "${comment.body}"
+    }
+  }
+  elem.history.each { history ->
+    history.changes?.each { change ->
+      mb.tr(class: "${rowClass}" ) {
+        td ""
+        td "history:"
+        td "${history.timestamp}"
+        td "${history.author}: ${change.field}"
+        td {
+          mkp.yieldUnescaped "${change.diff}"
+        }
+      }
+    }
+  }
+}
+
 def buildHtml(File outfile, def topLevel) {
   println "Writing results to file ${outfile.toString()}"
   outfile.withWriter('utf-8') { writer ->
@@ -200,43 +255,9 @@ def buildHtml(File outfile, def topLevel) {
       body(id: 'main') {
         div(class: 'container') {
           topLevel.each { rmKey, rmTicket ->
-            def rmStatusClass = ['Done', 'Cancelled', 'Closed'].contains(rmTicket.status) ? 'text-success'
-              : ['Launching', 'Ready for Launch'].contains(rmTicket.status) ? 'text-warning' : 'text-info'
-            div(class: 'row') {
-              div(class: 'col-12') {
-                h1 {
-                  a(href: "https://ticket.opower.com/browse/${rmKey}", target: '_blank', "${rmKey}")
-                  span(class: rmStatusClass, rmTicket.status)
-                  small(class: 'text-muted', rmTicket.summary)
-                }
-              }
-            }
-            if (rmTicket.due) {
-              div(class: 'row justify-content-end') {
-                div(class: 'col-3') {
-                  h5 "Due: ${rmTicket.due}"
-                }
-              }
-            }
+            buildHeader(builder, rmTicket, "h1")
             rmTicket.tickets.each { initiative ->
-              if (initiative.summary) {
-                def initiativeStatusClass = ['Done', 'Cancelled', 'Closed'].contains(initiative.status) ? 'text-success'
-                  : ['Launching', 'Ready for Launch'].contains(initiative.status) ? 'text-warning' : 'text-info'
-                div(class: 'row') {
-                  div(class: 'col-12') {
-                    h3 {
-                      a(href: "https://ticket.opower.com/browse/${initiative.key}", target: '_blank', "${initiative.key}")
-                      span(class: initiativeStatusClass, initiative.status)
-                      small(class: 'text-muted', initiative.summary)
-                    }
-                  }
-                }
-                div(class: 'row justify-content-end') {
-                  div(class: 'col-3') {
-                    h5 "Due: ${initiative.due}"
-                  }
-                }
-              }
+              buildHeader(builder, initiative, "h3")
               table(class: 'table table-hover') {
                 tbody {
                   initiative.tickets.eachWithIndex { result, idx ->
@@ -244,37 +265,8 @@ def buildHtml(File outfile, def topLevel) {
                       result.type == 'Feature' ? 'table-dark' :
                       idx %2 ? '' : 'table-secondary'
                     def rowClass = idx %2 ? '' : 'table-secondary'
-                    tr(class: "${headerClass}" ) {
-                      th {
-                        a(href: "https://ticket.opower.com/browse/${result.key}", target: '_blank', "${result.key}")
-                      }
-                      th "${result.type}"
-                      th "${result.created}"
-                      th "${result.team}"
-                      th "${result.summary}"
-                    }
-                    result.comments.each { comment ->
-                      tr(class: "${rowClass}" ) {
-                        td ""
-                        td "comment:"
-                        td "${comment.timestamp}"
-                        td "${comment.author}"
-                        td "${comment.body}"
-                      }
-                    }
-                    result.history.each { history ->
-                      history.changes?.each { change ->
-                        tr(class: "${rowClass}" ) {
-                          td ""
-                          td "history:"
-                          td "${history.timestamp}"
-                          td "${history.author}: ${change.field}"
-                          td {
-                            mkp.yieldUnescaped "${change.diff}"
-                          }
-                        }
-                      }
-                    }
+
+                    writeTicketRow builder, result, headerClass, rowClass
                   }
                 }
               }
