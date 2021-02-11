@@ -133,6 +133,8 @@ def parseResults(queryResponse) {
     ZonedDateTime created = ZonedDateTime.parse(issue.fields.created, FORMATTER)
     result.created = created.format(DateTimeFormatter.ISO_LOCAL_DATE )
     result.newlyCreated = created.toInstant() > dateFilter
+    result.due = issue.fields.duedate
+    result.status = issue.fields.status.name
     result.team = issue.fields[scrumTeamFieldName]?.value
     result.feature = issue.fields[featureLinkFieldName]
     result.comments = issue.fields.comment?.comments
@@ -172,7 +174,7 @@ def executeJql(String jql, Closure callback) {
   def request = [:]
   request.jql = jql
   request.maxResults = MAX_RESULTS
-  request.fields = [ 'key', 'summary', 'issuetype', scrumTeamFieldName, featureLinkFieldName, 'created', 'comment', 'issuelinks' ]
+  request.fields = [ 'key', 'summary', 'issuetype', scrumTeamFieldName, featureLinkFieldName, 'created', 'comment', 'issuelinks', 'duedate', 'status' ]
   request.expand = [ 'changelog' ]
 
   for (Integer startAt = 0, total = 1; startAt < total; startAt += MAX_RESULTS) {
@@ -197,42 +199,79 @@ def buildHtml(File outfile, def topLevel) {
       }
       body(id: 'main') {
         div(class: 'container') {
-          topLevel.each { key, details ->
-            h3("${key}:", {  small(class: 'text-muted', "${details.summary}") })
-            table(class: 'table table-hover') {
-              tbody {
-                details.tickets.eachWithIndex { result, idx ->
-                  def headerClass = result.newlyCreated ? 'table-info' :
-                    result.type == 'Feature' ? 'table-dark' :
-                    idx %2 ? '' : 'table-secondary'
-                  def rowClass = idx %2 ? '' : 'table-secondary'
-                  tr(class: "${headerClass}" ) {
-                    th {
-                      a(href: "https://ticket.opower.com/browse/${result.key}", target: '_blank', "${result.key}")
+          topLevel.each { rmKey, rmTicket ->
+            def rmStatusClass = ['Done', 'Cancelled', 'Closed'].contains(rmTicket.status) ? 'text-success'
+              : ['Launching', 'Ready for Launch'].contains(rmTicket.status) ? 'text-warning' : 'text-info'
+            div(class: 'row') {
+              div(class: 'col-12') {
+                h1 {
+                  a(href: "https://ticket.opower.com/browse/${rmKey}", target: '_blank', "${rmKey}")
+                  span(class: rmStatusClass, rmTicket.status)
+                  small(class: 'text-muted', rmTicket.summary)
+                }
+              }
+            }
+            if (rmTicket.due) {
+              div(class: 'row justify-content-end') {
+                div(class: 'col-3') {
+                  h5 "Due: ${rmTicket.due}"
+                }
+              }
+            }
+            rmTicket.tickets.each { initiative ->
+              if (initiative.summary) {
+                def initiativeStatusClass = ['Done', 'Cancelled', 'Closed'].contains(initiative.status) ? 'text-success'
+                  : ['Launching', 'Ready for Launch'].contains(initiative.status) ? 'text-warning' : 'text-info'
+                div(class: 'row') {
+                  div(class: 'col-12') {
+                    h3 {
+                      a(href: "https://ticket.opower.com/browse/${initiative.key}", target: '_blank', "${initiative.key}")
+                      span(class: initiativeStatusClass, initiative.status)
+                      small(class: 'text-muted', initiative.summary)
                     }
-                    th "${result.type}"
-                    th "${result.created}"
-                    th "${result.team}"
-                    th "${result.summary}"
                   }
-                  result.comments.each { comment ->
-                    tr(class: "${rowClass}" ) {
-                      td ""
-                      td "comment:"
-                      td "${comment.timestamp}"
-                      td "${comment.author}"
-                      td "${comment.body}"
+                }
+                div(class: 'row justify-content-end') {
+                  div(class: 'col-3') {
+                    h5 "Due: ${initiative.due}"
+                  }
+                }
+              }
+              table(class: 'table table-hover') {
+                tbody {
+                  initiative.tickets.eachWithIndex { result, idx ->
+                    def headerClass = result.newlyCreated ? 'table-info' :
+                      result.type == 'Feature' ? 'table-dark' :
+                      idx %2 ? '' : 'table-secondary'
+                    def rowClass = idx %2 ? '' : 'table-secondary'
+                    tr(class: "${headerClass}" ) {
+                      th {
+                        a(href: "https://ticket.opower.com/browse/${result.key}", target: '_blank', "${result.key}")
+                      }
+                      th "${result.type}"
+                      th "${result.created}"
+                      th "${result.team}"
+                      th "${result.summary}"
                     }
-                  }
-                  result.history.each { history ->
-                    history.changes?.each { change ->
+                    result.comments.each { comment ->
                       tr(class: "${rowClass}" ) {
                         td ""
-                        td "history:"
-                        td "${history.timestamp}"
-                        td "${history.author}: ${change.field}"
-                        td {
-                          mkp.yieldUnescaped "${change.diff}"
+                        td "comment:"
+                        td "${comment.timestamp}"
+                        td "${comment.author}"
+                        td "${comment.body}"
+                      }
+                    }
+                    result.history.each { history ->
+                      history.changes?.each { change ->
+                        tr(class: "${rowClass}" ) {
+                          td ""
+                          td "history:"
+                          td "${history.timestamp}"
+                          td "${history.author}: ${change.field}"
+                          td {
+                            mkp.yieldUnescaped "${change.diff}"
+                          }
                         }
                       }
                     }
@@ -255,12 +294,28 @@ try {
 
   println "Authentication success!"
 
-  def roadmapsJql = "project = DSM and type = \"Group Initiative\" and issueFunction in linkedIssuesOf('category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")')"
+  // get all linked RM tickets to DSM Initiatives
+  def rmJql = "project = RM and issueFunction in linkedIssuesOf(\"project = DSM and type = 'Group Initiative'\") order by due ASC"
+  def rm = [:]
+    executeJql(rmJql, { response ->
+    parseResults(response).each { result -> rm.put(result.key, result << [tickets: [] ]) }
+  })
+
+  def roadmapsJql = "project = DSM and type = \"Group Initiative\" and issueFunction in linkedIssuesOf('category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")') order by due ASC"
 
   // get initiatives that have updated tickets in the past X days
   def initiatives = [:]
   executeJql(roadmapsJql, { response ->
-    parseResults(response).each { result -> initiatives.put(result.key, result << [tickets: [] ]) }
+    parseResults(response).each { result -> {
+      initiatives.put(result.key, result << [tickets: [] ]) }
+      def rmKey = result.links?.find { issueKey -> rm.containsKey(issueKey) }
+      if (rmKey) {
+        rm[rmKey].tickets.add(result)
+      }
+      else {
+        prinln("warning - found initiative ${result.key} that does not belong to an RM ticket")
+      }
+    }
   })
 
   // get features that have updated tickets in the past X days
@@ -283,7 +338,8 @@ try {
   })
 
   // map features to roadmaps
-  initiatives.put('NI', [ summary:'Features without Initiatives', tickets: [] ])
+  rm.put('NI', [  key: 'NI', summary: 'Features without Initiatives', tickets: [  ] ])
+  def ni = [ key: 'NI', tickets: [ ] ]
   features.each { key, feature ->
     def initiativeKey = feature.links?.find { issueKey -> initiatives.containsKey(issueKey) }
     if (initiativeKey) {
@@ -291,21 +347,31 @@ try {
       initiatives[initiativeKey].tickets.addAll(feature.tickets)
     }
     else {
-      initiatives['NI'].tickets.add(feature)
-      initiatives['NI'].tickets.addAll(feature.tickets)
+      ni.tickets.add(feature)
+      ni.tickets.addAll(feature.tickets)
     }
   }
 
+  rm['NI'].tickets << ni
+
   String issuesNoFeaturesJql = "category = DSM AND type in (\"user story\", bug, task) AND updated > -${daysBack}d AND \"Feature Link\" is EMPTY order by \"UGBU Scrum Team\" ASC, updated ASC"
-  initiatives.put('NF', [ summary:'Issues without Features', tickets: [] ])
+  rm.put('NF', [ key: 'NF', summary:'Issues without Features', tickets: [  ] ])
+  def nf = [ key: 'NF', tickets: [ ] ]
   executeJql(issuesNoFeaturesJql, { response ->
-    initiatives['NF'].tickets.addAll(parseResults(response).findAll { result ->
+    nf.tickets.addAll(parseResults(response).findAll { result ->
       result.newlyCreated || result.comments || result.history
     })
   })
 
+  rm['NF'].tickets << nf
+
+  rm = rm.findAll { rmEntry ->
+    !rmEntry.value.tickets.empty
+  }
+
+  // println "Results:\n${prettyPrint(toJson(rm))}"
   File outfile = createFile(mode.text, daysBack)
-  buildHtml outfile, initiatives
+  buildHtml outfile, rm
 }
 catch (Exception e) {
   println "${e.message}"
