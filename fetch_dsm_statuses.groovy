@@ -56,7 +56,6 @@ enum Mode {
   STORIES("stories"),
   FEATURES("features"),
   INITIATIVES("initiatives"),
-  ROADMAPS("roadmaps")
 
   final String text
   Mode(String text) {
@@ -336,7 +335,6 @@ def produceStoriesOutput() {
     !rmEntry.value.tickets.empty
   }
 
-  // println "Results:\n${prettyPrint(toJson(rm))}"
   File outfile = createFile(mode.text, daysBack)
   buildHtml outfile, { builder ->
     rm.each { rmKey, rmTicket ->
@@ -358,6 +356,87 @@ def produceStoriesOutput() {
       }
     }
   }
+}
+
+def producteFeatureOutput() {
+  def rm = [:]
+    executeJql(ROADMAPS_JQL, { response ->
+    parseResults(response).each { result -> rm.put(result.key, result << [tickets: [] ]) }
+  })
+
+  // get initiatives that have updated tickets in the past X days
+  def initiativeJql = "project = DSM and type = \"Group Initiative\" and issueFunction in linkedIssuesOf('category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")') order by due ASC"
+  def initiatives = [:]
+  executeJql(initiativeJql, { response ->
+    parseResults(response).each { result -> {
+      initiatives.put(result.key, result << [tickets: [] ]) }
+    }
+  })
+
+  // get features that have updated tickets in the past X days
+  def featureJql = "category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")"
+  def features = [:]
+  executeJql(featureJql, { response ->
+    parseResults(response).each { result ->
+      result.history = result.history.findAll { history ->
+        history.changes = history.changes?.findAll { change -> change.field != 'Epic Child' }
+        !history.changes?.isEmpty()
+      }
+      if (result.newlyCreated || result.comments || result.history) {
+        features.put(result.key, result << [tickets: [] ])
+      }
+    }
+  })
+
+  // map features to roadmaps
+  rm.put('NI', [  key: 'NI', summary: 'Features without Initiatives', tickets: [  ] ])
+  def ni = [ key: 'NI', tickets: [ ] ]
+  features.each { key, feature ->
+    def initiativeKey = feature.links?.find { issueKey -> initiatives.containsKey(issueKey) }
+    if (initiativeKey) {
+      initiatives[initiativeKey].tickets.add(feature)
+      initiatives[initiativeKey].tickets.addAll(feature.tickets)
+    }
+    else {
+      ni.tickets.add(feature)
+      ni.tickets.addAll(feature.tickets)
+    }
+  }
+  rm['NI'].tickets << ni
+
+  // filter out empty initiatives
+  initiatives = initiatives.findAll { initiative -> !initiative.value.tickets.empty }
+
+  initiatives.each { initiativeKey, initiativeTicket ->
+    def rmKey = initiativeTicket.links?.find { issueKey -> rm.containsKey(issueKey) }
+    if (rmKey) {
+      rm[rmKey].tickets.add(initiativeTicket)
+    }
+    else {
+      prinln("warning - found initiative ${result.key} that does not belong to an RM ticket")
+    }
+  }
+
+  rm = rm.findAll { rmEntry -> !rmEntry.value.tickets.empty }
+  File outfile = createFile(mode.text, daysBack)
+  buildHtml outfile, { builder ->
+    rm.each { rmKey, rmTicket ->
+      buildHeader(builder, rmTicket, "h1")
+      rmTicket.tickets.each { initiative ->
+        buildHeader(builder, initiative, "h3")
+        builder.table(class: 'table table-hover') {
+          tbody {
+            initiative.tickets.eachWithIndex { result, idx ->
+              def rowClass = idx %2 ? '' : 'table-secondary'
+              def headerClass = result.newlyCreated ? 'table-info' : rowClass
+              writeTicketRow builder, result, headerClass, rowClass
+            }
+          }
+        }
+      }
+    }
+  }
+
 }
 
 def produceInitiativesOutput() {
@@ -423,13 +502,10 @@ try {
       produceStoriesOutput()
       break
     case Mode.FEATURES:
-      println "foo"
+      producteFeatureOutput()
       break
     case Mode.INITIATIVES:
       produceInitiativesOutput()
-      break
-    case Mode.ROADMAPS:
-      println "gah"
       break
   }
 }
