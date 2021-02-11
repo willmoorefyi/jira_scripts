@@ -28,17 +28,6 @@ import groovy.json.JsonOutput
 import groovy.transform.Field
 import groovy.xml.*
 
-@Field final String JIRA_REST_URL = 'https://ticket.opower.com/rest/api/latest'
-@Field final JsonSlurper json = new JsonSlurper()
-@Field final DateTimeFormatter JIRA_DATE_TIME_FORMAT = DateTimeFormatter.ofPattern("d/MMM/yy")
-@Field final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSZ")
-@Field final DiffMatchPatch DMP = new DiffMatchPatch()
-
-@Field final Integer MAX_RESULTS = 100
-// TODO look up custom field for "UGBU Scrum Team" and "Feature Link"
-@Field final String scrumTeamFieldName = 'customfield_15751'
-@Field final String featureLinkFieldName = 'customfield_13258'
-
 @Option(names = ["-u", "--user"], description = 'The JIRA Username, defaults to $USERNAME. Required')
 @Field String username = System.getenv().USERNAME
 
@@ -50,6 +39,18 @@ import groovy.xml.*
 
 @Option(names = ["-d", "--daysBack"], description = 'Days back to look for issue changes', required = true)
 @Field Integer daysBack
+
+@Field final String JIRA_REST_URL = 'https://ticket.opower.com/rest/api/latest'
+@Field final JsonSlurper json = new JsonSlurper()
+@Field final DateTimeFormatter JIRA_DATE_TIME_FORMAT = DateTimeFormatter.ofPattern("d/MMM/yy")
+@Field final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSZ")
+@Field final DiffMatchPatch DMP = new DiffMatchPatch()
+@Field final String ROADMAPS_JQL = "project = RM and issueFunction in linkedIssuesOf(\"project = DSM and type = 'Group Initiative'\") order by due ASC"
+
+@Field final Integer MAX_RESULTS = 100
+// TODO look up custom field for "UGBU Scrum Team" and "Feature Link"
+@Field final String scrumTeamFieldName = 'customfield_15751'
+@Field final String featureLinkFieldName = 'customfield_13258'
 
 enum Mode {
   STORIES("stories"),
@@ -170,7 +171,7 @@ def parseResults(queryResponse) {
 }
 
 def executeJql(String jql, Closure callback) {
-
+  println "Executing Query: ${jql}"
   def request = [:]
   request.jql = jql
   request.maxResults = MAX_RESULTS
@@ -215,7 +216,7 @@ def writeTicketRow(MarkupBuilder mb, Map elem, String headerClass, String rowCla
     }
     th "${elem.type}"
     th "${elem.created}"
-    th "${elem.team}"
+    th "${elem.team ?: ""}"
     th "${elem.summary}"
   }
   elem.comments.each { comment ->
@@ -242,7 +243,7 @@ def writeTicketRow(MarkupBuilder mb, Map elem, String headerClass, String rowCla
   }
 }
 
-def buildHtml(File outfile, def topLevel) {
+def buildHtml(File outfile, Closure bodyClosure) {
   println "Writing results to file ${outfile.toString()}"
   outfile.withWriter('utf-8') { writer ->
     def builder = new MarkupBuilder(writer)
@@ -254,50 +255,24 @@ def buildHtml(File outfile, def topLevel) {
       }
       body(id: 'main') {
         div(class: 'container') {
-          topLevel.each { rmKey, rmTicket ->
-            buildHeader(builder, rmTicket, "h1")
-            rmTicket.tickets.each { initiative ->
-              buildHeader(builder, initiative, "h3")
-              table(class: 'table table-hover') {
-                tbody {
-                  initiative.tickets.eachWithIndex { result, idx ->
-                    def headerClass = result.newlyCreated ? 'table-info' :
-                      result.type == 'Feature' ? 'table-dark' :
-                      idx %2 ? '' : 'table-secondary'
-                    def rowClass = idx %2 ? '' : 'table-secondary'
-
-                    writeTicketRow builder, result, headerClass, rowClass
-                  }
-                }
-              }
-            }
-          }
+          bodyClosure builder
         }
       }
     }
   }
 }
 
-println "Validating credentials"
-try {
-  AuthHolder.initialize(username, password)
-
-  http '/mypermissions'
-
-  println "Authentication success!"
-
-  // get all linked RM tickets to DSM Initiatives
-  def rmJql = "project = RM and issueFunction in linkedIssuesOf(\"project = DSM and type = 'Group Initiative'\") order by due ASC"
+def produceStoriesOutput() {
+    // get all linked RM tickets to DSM Initiatives
   def rm = [:]
-    executeJql(rmJql, { response ->
+    executeJql(ROADMAPS_JQL, { response ->
     parseResults(response).each { result -> rm.put(result.key, result << [tickets: [] ]) }
   })
 
-  def roadmapsJql = "project = DSM and type = \"Group Initiative\" and issueFunction in linkedIssuesOf('category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")') order by due ASC"
-
   // get initiatives that have updated tickets in the past X days
+  def initiativeJql = "project = DSM and type = \"Group Initiative\" and issueFunction in linkedIssuesOf('category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")') order by due ASC"
   def initiatives = [:]
-  executeJql(roadmapsJql, { response ->
+  executeJql(initiativeJql, { response ->
     parseResults(response).each { result -> {
       initiatives.put(result.key, result << [tickets: [] ]) }
       def rmKey = result.links?.find { issueKey -> rm.containsKey(issueKey) }
@@ -363,7 +338,100 @@ try {
 
   // println "Results:\n${prettyPrint(toJson(rm))}"
   File outfile = createFile(mode.text, daysBack)
-  buildHtml outfile, rm
+  buildHtml outfile, { builder ->
+    rm.each { rmKey, rmTicket ->
+      buildHeader(builder, rmTicket, "h1")
+      rmTicket.tickets.each { initiative ->
+        buildHeader(builder, initiative, "h3")
+        builder.table(class: 'table table-hover') {
+          tbody {
+            initiative.tickets.eachWithIndex { result, idx ->
+              def headerClass = result.newlyCreated ? 'table-info' :
+                result.type == 'Feature' ? 'table-dark' :
+                idx %2 ? '' : 'table-secondary'
+              def rowClass = idx %2 ? '' : 'table-secondary'
+
+              writeTicketRow builder, result, headerClass, rowClass
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+def produceInitiativesOutput() {
+      // get all linked RM tickets to DSM Initiatives
+  def rm = [:]
+    executeJql(ROADMAPS_JQL, { response ->
+    parseResults(response).each { result -> rm.put(result.key, result << [tickets: [] ]) }
+  })
+
+  // get initiatives that have updated tickets in the past X days
+  def initiativeJql = "project = DSM and type = \"Group Initiative\" and issueFunction in linkedIssuesOf('category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")') order by due ASC"
+  def initiatives = [:]
+  executeJql(initiativeJql, { response ->
+    parseResults(response).each { result -> {
+      initiatives.put(result.key, result << [tickets: [] ]) }
+      if (result.newlyCreated || result.comments) {
+        result.history.clear
+        def rmKey = result.links?.find { issueKey -> rm.containsKey(issueKey) }
+        if (rmKey) {
+          rm[rmKey].tickets.add(result)
+        }
+        else {
+          prinln("warning - found initiative ${result.key} that does not belong to an RM ticket")
+        }
+      }
+    }
+  })
+
+  rm = rm.findAll { rmEntry ->
+    !rmEntry.value.tickets.empty
+  }
+
+  File outfile = createFile(mode.text, daysBack)
+  buildHtml outfile, { builder ->
+    rm.each { rmKey, rmTicket ->
+      buildHeader(builder, rmTicket, "h1")
+      builder.table(class: 'table table-hover') {
+        tbody {
+          rmTicket.tickets.eachWithIndex { result, idx ->
+            def headerClass = result.newlyCreated ? 'table-info' :
+              result.type == 'Feature' ? 'table-dark' :
+              idx %2 ? '' : 'table-secondary'
+            def rowClass = idx %2 ? '' : 'table-secondary'
+
+            writeTicketRow builder, result, headerClass, rowClass
+          }
+        }
+      }
+    }
+  }
+}
+
+println "Validating credentials"
+try {
+  AuthHolder.initialize(username, password)
+
+  http '/mypermissions'
+
+  println "Authentication success!"
+
+  switch (mode) {
+    case Mode.STORIES:
+      produceStoriesOutput()
+      break
+    case Mode.FEATURES:
+      println "foo"
+      break
+    case Mode.INITIATIVES:
+      produceInitiativesOutput()
+      break
+    case Mode.ROADMAPS:
+      println "gah"
+      break
+  }
 }
 catch (Exception e) {
   println "${e.message}"
