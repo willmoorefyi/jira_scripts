@@ -13,6 +13,13 @@ import static java.time.temporal.ChronoField.NANO_OF_SECOND;
 @Grab(group='org.bitbucket.cowwoc', module='diff-match-patch', version='1.2')
 import org.bitbucket.cowwoc.diffmatchpatch.DiffMatchPatch
 
+@Grab(group='org.commonmark', module='commonmark', version='0.17.1')
+import org.commonmark.parser.Parser
+import org.commonmark.renderer.html.HtmlRenderer
+
+@Grab(group='org.jsoup', module='jsoup', version='1.13.1')
+import static org.jsoup.parser.Parser.unescapeEntities
+
 @Grab('info.picocli:picocli-groovy:4.5.2')
 @GrabConfig(systemClassLoader=true)
 @Command(name = "fetch_dsm_status",
@@ -51,6 +58,10 @@ import groovy.xml.*
 // TODO look up custom field for "UGBU Scrum Team" and "Feature Link"
 @Field final String scrumTeamFieldName = 'customfield_15751'
 @Field final String featureLinkFieldName = 'customfield_13258'
+
+// Utilities to convert from markdown-style syntax to HTML.  Pray it works for JIRA
+@Field final Parser jiraMarkdownParser = Parser.builder().build();
+@Field final HtmlRenderer jiraMarkdownRenderer = HtmlRenderer.builder().build();
 
 enum Mode {
   STORIES("stories"),
@@ -143,7 +154,7 @@ def parseResults(queryResponse) {
         def commentEntry = [:]
         commentEntry.timestamp = ZonedDateTime.parse(entry.created, FORMATTER).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME )
         commentEntry.author = entry.author?.displayName
-        commentEntry.body = entry.body
+        commentEntry.body = jiraMarkdownRenderer.render(jiraMarkdownParser.parse(entry.body ?: ""))
         commentEntry
       }
     result.history = issue.changelog?.histories.findResults { entry ->
@@ -155,7 +166,9 @@ def parseResults(queryResponse) {
           if (! ['Rank', 'RemoteIssueLink', 'Sprint', 'Committed Fix Version'].contains(item.field)) {
             def historyItem = [:]
             historyItem.field = item.field
-            List<DiffMatchPatch.Diff> diff = DMP.diffMain(item.fromString ?: "", item.toString ?: "");
+            //String fromField = jiraMarkdownRenderer.render(jiraMarkdownParser.parse(item.fromString ?: ""))
+            //String toField = jiraMarkdownRenderer.render(jiraMarkdownParser.parse(item.toString ?: ""))
+            List<DiffMatchPatch.Diff> diff = DMP.diffMain(item.fromString ?: "", item.toString ?: "")
             DMP.diffCleanupSemantic(diff)
             historyItem.diff = DMP.diffPrettyHtml(diff)
             historyItem
@@ -224,7 +237,9 @@ def writeTicketRow(MarkupBuilder mb, Map elem, String headerClass, String rowCla
       td "comment:"
       td "${comment.timestamp}"
       td "${comment.author}"
-      td "${comment.body}"
+      td {
+        mkp.yieldUnescaped"${unescapeEntities(comment.body, false)}"
+      }
     }
   }
   elem.history.each { history ->
