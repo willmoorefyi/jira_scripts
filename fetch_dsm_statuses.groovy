@@ -8,14 +8,11 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeFormatterBuilder
 import java.util.UUID
+
 import static java.time.temporal.ChronoField.NANO_OF_SECOND;
 
 @Grab(group='org.bitbucket.cowwoc', module='diff-match-patch', version='1.2')
 import org.bitbucket.cowwoc.diffmatchpatch.DiffMatchPatch
-
-@Grab(group='org.commonmark', module='commonmark', version='0.17.1')
-import org.commonmark.parser.Parser
-import org.commonmark.renderer.html.HtmlRenderer
 
 @Grab(group='org.jsoup', module='jsoup', version='1.13.1')
 import static org.jsoup.parser.Parser.unescapeEntities
@@ -58,10 +55,6 @@ import groovy.xml.*
 // TODO look up custom field for "UGBU Scrum Team" and "Feature Link"
 @Field final String scrumTeamFieldName = 'customfield_15751'
 @Field final String featureLinkFieldName = 'customfield_13258'
-
-// Utilities to convert from markdown-style syntax to HTML.  Pray it works for JIRA
-@Field final Parser jiraMarkdownParser = Parser.builder().build();
-@Field final HtmlRenderer jiraMarkdownRenderer = HtmlRenderer.builder().build();
 
 enum Mode {
   STORIES("stories"),
@@ -154,7 +147,7 @@ def parseResults(queryResponse) {
         def commentEntry = [:]
         commentEntry.timestamp = ZonedDateTime.parse(entry.created, FORMATTER).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME )
         commentEntry.author = entry.author?.displayName
-        commentEntry.body = jiraMarkdownRenderer.render(jiraMarkdownParser.parse(entry.body ?: ""))
+        commentEntry.body = issue.renderedFields.comment.comments.find { renderendEntry -> renderendEntry.id == entry.id }.body ?: ""
         commentEntry
       }
     result.history = issue.changelog?.histories.findResults { entry ->
@@ -166,8 +159,6 @@ def parseResults(queryResponse) {
           if (! ['Rank', 'RemoteIssueLink', 'Sprint', 'Committed Fix Version'].contains(item.field)) {
             def historyItem = [:]
             historyItem.field = item.field
-            //String fromField = jiraMarkdownRenderer.render(jiraMarkdownParser.parse(item.fromString ?: ""))
-            //String toField = jiraMarkdownRenderer.render(jiraMarkdownParser.parse(item.toString ?: ""))
             List<DiffMatchPatch.Diff> diff = DMP.diffMain(item.fromString ?: "", item.toString ?: "")
             DMP.diffCleanupSemantic(diff)
             historyItem.diff = DMP.diffPrettyHtml(diff)
@@ -188,7 +179,7 @@ def executeJql(String jql, Closure callback) {
   request.jql = jql
   request.maxResults = MAX_RESULTS
   request.fields = [ 'key', 'summary', 'issuetype', scrumTeamFieldName, featureLinkFieldName, 'created', 'comment', 'issuelinks', 'duedate', 'status' ]
-  request.expand = [ 'changelog' ]
+  request.expand = [ 'changelog', 'renderedFields' ]
 
   for (Integer startAt = 0, total = 1; startAt < total; startAt += MAX_RESULTS) {
     request.startAt = startAt
