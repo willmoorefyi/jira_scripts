@@ -285,7 +285,7 @@ def produceStoriesOutput() {
         rm[rmKey].tickets.add(result)
       }
       else {
-        prinln("warning - found initiative ${result.key} that does not belong to an RM ticket")
+        println("warning - found initiative ${result.key} that does not belong to an RM ticket")
       }
     }
   })
@@ -453,7 +453,7 @@ def produceInitiativesOutput() {
   })
 
   // get initiatives that have updated tickets in the past X days
-  def initiativeJql = "project = DSM and type = \"Group Initiative\" and issueFunction in linkedIssuesOf('category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")') order by due ASC"
+  def initiativeJql = "project = DSM and type = \"Group Initiative\" and (updated > -${daysBack}d OR issueFunction in linkedIssuesOf('category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")')) order by due ASC"
   def initiatives = [:]
   executeJql(initiativeJql, { response ->
     parseResults(response).each { result -> {
