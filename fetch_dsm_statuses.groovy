@@ -49,7 +49,7 @@ import groovy.xml.*
 @Field final DateTimeFormatter JIRA_DATE_TIME_FORMAT = DateTimeFormatter.ofPattern("d/MMM/yy")
 @Field final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSZ")
 @Field final DiffMatchPatch DMP = new DiffMatchPatch()
-@Field final String ROADMAPS_JQL = "project = RM and issueFunction in linkedIssuesOf(\"project = DSM and type = 'Group Initiative'\") order by due ASC"
+@Field final String ROADMAPS_JQL = "project = RM and issueFunction in linkedIssuesOf(\"project = DSM and type = 'Group Initiative Milestone'\") order by due ASC"
 
 @Field final Integer MAX_RESULTS = 100
 // TODO look up custom field for "UGBU Scrum Team" and "Feature Link"
@@ -275,7 +275,7 @@ def produceStoriesOutput() {
   })
 
   // get initiatives that have updated tickets in the past X days
-  def initiativeJql = "project = DSM and type = \"Group Initiative\" and issueFunction in linkedIssuesOf('category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")') order by due ASC"
+  def initiativeJql = "project = DSM and type = \"Group Initiative Milestone\" and issueFunction in linkedIssuesOf('category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")') order by due ASC"
   def initiatives = [:]
   executeJql(initiativeJql, { response ->
     parseResults(response).each { result -> {
@@ -371,7 +371,7 @@ def producteFeatureOutput() {
   })
 
   // get initiatives that have updated tickets in the past X days
-  def initiativeJql = "project = DSM and type = \"Group Initiative\" and issueFunction in linkedIssuesOf('category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")') order by due ASC"
+  def initiativeJql = "project = DSM and type = \"Group Initiative Milestone\" and issueFunction in linkedIssuesOf('category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")') order by due ASC"
   def initiatives = [:]
   executeJql(initiativeJql, { response ->
     parseResults(response).each { result -> {
@@ -453,7 +453,7 @@ def produceInitiativesOutput() {
   })
 
   // get initiatives that have updated tickets in the past X days
-  def initiativeJql = "project = DSM and type = \"Group Initiative\" and (updated > -${daysBack}d OR issueFunction in linkedIssuesOf('category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")')) order by due ASC"
+  def initiativeJql = "project = DSM and type = \"Group Initiative Milestone\" and (updated > -${daysBack}d OR issueFunction in linkedIssuesOf('category = DSM and type = feature and issueFunction in epicsOf(\"category = DSM and updated > -${daysBack}d\")')) order by due ASC"
   def initiatives = [:]
   executeJql(initiativeJql, { response ->
     parseResults(response).each { result -> {
