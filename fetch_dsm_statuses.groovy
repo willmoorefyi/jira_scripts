@@ -419,7 +419,7 @@ def producteFeatureOutput() {
       rm[rmKey].tickets.add(initiativeTicket)
     }
     else {
-      prinln("warning - found initiative ${result.key} that does not belong to an RM ticket")
+      println("warning - found initiative ${result.key} that does not belong to an RM ticket")
     }
   }
 
@@ -465,7 +465,7 @@ def produceInitiativesOutput() {
           rm[rmKey].tickets.add(result)
         }
         else {
-          prinln("warning - found initiative ${result.key} that does not belong to an RM ticket")
+          println("warning - found initiative ${result.key} that does not belong to an RM ticket")
         }
       }
     }
