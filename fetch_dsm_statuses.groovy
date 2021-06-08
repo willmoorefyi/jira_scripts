@@ -44,6 +44,9 @@ import groovy.xml.*
 @Option(names = ["-d", "--daysBack"], description = 'Days back to look for issue changes', required = true)
 @Field Integer daysBack
 
+@Option(names = ["-o", "--hoursBack"], description = 'Hours back to look for issue changes')
+@Field Integer hoursBack
+
 @Field final String JIRA_REST_URL = 'https://ticket.opower.com/rest/api/latest'
 @Field final JsonSlurper json = new JsonSlurper()
 @Field final DateTimeFormatter JIRA_DATE_TIME_FORMAT = DateTimeFormatter.ofPattern("d/MMM/yy")
@@ -255,8 +258,15 @@ def buildHtml(File outfile, Closure bodyClosure) {
     builder.html {
       head {
         meta charset: 'utf-8'
-        link href: "https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta2/dist/css/bootstrap.min.css", rel:"stylesheet", integrity:"sha384-BmbxuPwQa2lc/FVzBcNJ7UAyJxM6wuqIj61tLrc4wSX0szH/Ev+nYRRuWlolflfl", crossorigin:"anonymous"
+        link href: "https://cdn.jsdelivr.net/npm/bootstrap@5.0.1/dist/css/bootstrap.min.css", rel:"stylesheet", integrity:"sha384-+0n0xVW2eSR5OomGNYDnhzAbDsOXxcvSN1TPprVMTNDbiYZCxYbOOl7+AMvyTG2x", crossorigin:"anonymous"
         title 'DSM Status'
+        style(type: 'text/css', '''
+          td {
+            word-wrap:break-word;
+            word-break:break-all;
+            white-space: normal !important;
+          }
+          ''')
       }
       body(id: 'main') {
         div(class: 'container') {
@@ -347,15 +357,19 @@ def produceStoriesOutput() {
       buildHeader(builder, rmTicket, "h1")
       rmTicket.tickets.each { initiative ->
         buildHeader(builder, initiative, "h3")
-        builder.table(class: 'table table-hover') {
-          tbody {
-            initiative.tickets.eachWithIndex { result, idx ->
-              def headerClass = result.newlyCreated ? 'table-info' :
-                result.type == 'Feature' ? 'table-dark' :
-                idx %2 ? '' : 'table-secondary'
-              def rowClass = idx %2 ? '' : 'table-secondary'
+        builder.div(class: 'row') {
+          div(class: 'col-12') {
+            table(class: 'table table-hover') {
+              tbody {
+                initiative.tickets.eachWithIndex { result, idx ->
+                  def headerClass = result.newlyCreated ? 'table-info' :
+                    result.type == 'Feature' ? 'table-dark' :
+                    idx %2 ? '' : 'table-secondary'
+                  def rowClass = idx %2 ? '' : 'table-secondary'
 
-              writeTicketRow builder, result, headerClass, rowClass
+                  writeTicketRow builder, result, headerClass, rowClass
+                }
+              }
             }
           }
         }
