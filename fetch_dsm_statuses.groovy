@@ -263,7 +263,6 @@ def buildHtml(File outfile, Closure bodyClosure) {
         style(type: 'text/css', '''
           td {
             word-wrap:break-word;
-            word-break:break-all;
             white-space: normal !important;
           }
           ''')
