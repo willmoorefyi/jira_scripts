@@ -139,6 +139,20 @@ def parseResults(queryResponse) {
   }
 }
 
+def syncValues(feature) {
+  def updateFixVersion = feature.fixVersions == feature.sprint ? null : feature.sprint
+  def updateTeam = feature.team == feature.labelTeam ? null : feature.labelTeam
+
+  if (updateFixVersion || updateTeam) {
+    if (dryRun) {
+      println "Updating ${feature.key}: team ${updateTeam}, fixVersion: ${updateFixVersion}"
+    }
+    else {
+
+    }
+  }
+}
+
 println "Validating credentials"
 try {
   AuthHolder.initialize(username, password)
@@ -148,7 +162,7 @@ try {
   println "Authentication success!"
 
   executeJql("project = DSM AND type = Feature AND status != Closed AND \"Target Delivery Date\" ~ ${increment}", response -> {
-    parseResults(response).each { println "${it}" }
+    parseResults(response).each { result -> syncValues(result) }
   })
 }
 catch (Exception e) {
