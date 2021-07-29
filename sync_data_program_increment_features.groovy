@@ -32,7 +32,7 @@ import groovy.xml.*
 
 @Option(names = ["-d", "--dry-run"], description = 'Dry run mode: only print changes to make')
 @Field boolean dryRun;
-  
+
 @Field final String JIRA_REST_URL = 'https://ticket.opower.com/rest/api/latest'
 @Field final JsonSlurper json = new JsonSlurper()
 @Field final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSZ")
@@ -102,7 +102,7 @@ def http(path, method="GET", requestBody=null) {
     throw new RuntimeException("JIRA server error ${response.statusCode()}, please use the UI to confirm the system is up and running")
   }
 
-  json.parseText response.body()
+  response.body() ? json.parseText(response.body()) : ''
 }
 
 def executeJql(String jql, Closure callback) {
@@ -156,10 +156,11 @@ def syncValues(feature) {
 
   if (!update.update.isEmpty()) {
     if (dryRun) {
-      println "Updating ${feature.key}: ${JsonOutput.toJson(update)}"
+      println "Updating ${feature.key}: ${toJson(update)}"
     }
     else {
-
+      def response = http "/issue/${feature.key}", 'PUT', HttpRequest.BodyPublishers.ofString("${toJson(update)}")
+      println "successfully updated ${feature.key}"
     }
   }
 }
