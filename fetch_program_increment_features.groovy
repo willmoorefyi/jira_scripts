@@ -1,12 +1,9 @@
 #!/usr/bin/env groovy
 import java.net.http.*
 import java.nio.file.*
-import java.time.Instant
 import java.time.LocalDate
 import java.time.ZonedDateTime
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.time.format.DateTimeFormatterBuilder
 import java.util.UUID
 
 @Grab(group='org.apache.commons', module='commons-csv', version='1.8')
@@ -23,7 +20,6 @@ import static picocli.CommandLine.*
 import static groovy.json.JsonOutput.*
 
 import groovy.json.JsonSlurper
-import groovy.json.JsonOutput
 import groovy.transform.Field
 import groovy.xml.*
 
@@ -38,7 +34,6 @@ import groovy.xml.*
 
 @Field final String JIRA_REST_URL = 'https://ticket.opower.com/rest/api/latest'
 @Field final JsonSlurper json = new JsonSlurper()
-@Field final DateTimeFormatter JIRA_DATE_TIME_FORMAT = DateTimeFormatter.ofPattern("d/MMM/yy")
 @Field final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSZ")
 
 @Field final Integer MAX_RESULTS = 100
@@ -140,7 +135,7 @@ def parseRMTickets(queryResponse) {
     result.summary = issue.fields.summary
     result.group = issue.fields[groupFieldName]?.value
     result.dependencies = issue.fields.issuelinks.findResults { link ->
-      if (link.type?.name == 'Dependency') link.type.inward == 'is a dependency for' ? link.inwardIssue?.key : link.outwardIssue?.key
+      if (link.type?.name == 'Dependency') link.type.inward == 'is a dependency for' ? link.outwardIssue?.key : link.inwardIssue?.key
     }
     result.includes = issue.fields.issuelinks.findResults { link ->
       if (link.type?.name == 'Feature Composition') link.type.inward == 'includes' ? link.inwardIssue?.key : link.outwardIssue?.key
