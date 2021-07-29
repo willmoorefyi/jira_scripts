@@ -48,7 +48,7 @@ import groovy.xml.*
 @Field final String targetDeliveryDateFieldName = 'customfield_14670'
 @Field final String groupFieldName = 'customfield_11551'
 @Field final String storyPointsFieldName = 'customfield_11352'
-@Field final String sprintFieldName = 'customfield_11450'
+//@Field final String sprintFieldName = 'customfield_11450'
 
 class AuthHolder {
   static def instance
@@ -119,8 +119,16 @@ def parseResults(queryResponse) {
     result.status = issue.fields.status.name
     result.team = issue.fields[scrumTeamFieldName]?.value
     result.group = issue.fields[groupFieldName]?.value
-    result.storyPoints = issue.fields.storyPointsFieldName
-    result.sprintFieldName = issue.fields.sprintFieldName
+    result.storyPoints = issue.fields[storyPointsFieldName]
+    result.fixVersions = issue.fields.fixVersions[0]?.name
+    def depKeys = issue.fields.issuelinks.findResults {link ->
+      if (link.type?.name == 'Dependency') link.type.inward == 'is a dependency for' ? link.inwardIssue?.key : link.outwardIssue?.key
+    }
+    result.links = issue.fields.issuelinks.findResults { link ->
+      if (link.type?.name == 'Feature Composition') link.type.inward == 'includes' ? link.outwardIssue?.key : link.inwardIssue?.key
+    } + depKeys
+    result.isDependency = depKeys != null && !depKeys.isEmpty()
+
     result
   }
 }
@@ -132,10 +140,10 @@ def parseRMTickets(queryResponse) {
     result.summary = issue.fields.summary
     result.group = issue.fields[groupFieldName]?.value
     result.dependencies = issue.fields.issuelinks.findResults { link ->
-      if (link.type?.outward == "has a dependency on") link.inwardIssue?.key ?: link.outwardIssue?.key
+      if (link.type?.name == 'Dependency') link.type.inward == 'is a dependency for' ? link.inwardIssue?.key : link.outwardIssue?.key
     }
     result.includes = issue.fields.issuelinks.findResults { link ->
-      if (link.type?.outward == "includes") link.inwardIssue?.key ?: link.outwardIssue?.key
+      if (link.type?.name == 'Feature Composition') link.type.inward == 'includes' ? link.inwardIssue?.key : link.outwardIssue?.key
     }
     result
   }
@@ -146,7 +154,7 @@ def executeJql(String jql, Closure callback) {
   def request = [:]
   request.jql = jql
   request.maxResults = MAX_RESULTS
-  request.fields = [ 'key', 'summary', 'issuetype', scrumTeamFieldName, groupFieldName, storyPointsFieldName, sprintFieldName, 'created', 'issuelinks', 'duedate', 'status' ]
+  request.fields = [ 'key', 'summary', 'issuetype', scrumTeamFieldName, groupFieldName, storyPointsFieldName, 'fixVersions', 'created', 'issuelinks', 'duedate', 'status' ]
   request.expand = [ 'renderedFields' ]
 
   for (Integer startAt = 0, total = 1; startAt < total; startAt += MAX_RESULTS) {
@@ -179,17 +187,35 @@ try {
   })
 
   def milestones = [:]
-  executeJql("project = DSM and type = \"Group Initiative Milestone\" and issueFunction in linkedIssuesOf(\"project = DSM and type = feature and \\\"Target Delivery Date\\\" ~ ${increment}\", \"is part of\")", { response ->
-    parseResults(response).each { result -> milestones.put(result.key, result) }
+  executeJql("project = DSM and type = \"Group Initiative Milestone\" and issueFunction in linkedIssuesOf(\"project = DSM and type = feature and \\\"Target Delivery Date\\\" ~ ${increment}\", \"is part of\")", { response -> 
+    parseResults(response).each { result ->
+      milestones.put(result.key, [ key: result.key, summary: result.summary, roadmap: result.links.findResult { roadmaps[it] } ])
+    }
+  })
+
+  def features = [ ]
+  executeJql("project = DSM AND type = Feature AND \"Target Delivery Date\" ~ ${increment}", { response ->
+    parseResults(response).each { result ->
+      def gim = result.links.findResult { milestones[it] }
+      features << result + [ milestone: gim?.key, roadmap: gim ? gim.roadmap.key : result.links.findResult { linkKey ->
+        result.links.findResult { roadmaps[it]?.key } ?: roadmaps.findResult { key, rm -> rm.includes.contains(linkKey) || rm.dependencies.contains(linkKey) ? key : null }
+      } ]
+    }
   })
 
   File outfile = createFile()
   println "Writing results to file ${outfile.toString()}"
   outfile.withWriter('utf-8') { writer ->
     try(CSVPrinter printer = new CSVPrinter(writer, CSVFormat.EXCEL.withHeader())) {
+      printer.printRecord("Roadmaps with committed work in ${increment}")
       printer.printRecords([["key","summary","group","dependencies","includes"]] + roadmaps.collect{ key, rm -> [key, rm.summary, rm.group, rm.dependencies, rm.includes] })
       printer.println()
-      printer.printRecords([["key", "summary"]] + milestones.collect{ key, milestone -> [ key, milestone.summary ] })
+      printer.printRecord("Initiative Milestones with committed work in ${increment}")
+      printer.printRecords([["key", "summary", "roadmap"]] + milestones.collect{ key, gim -> [key, gim.summary, gim.roadmap] })
+      printer.println()
+      printer.printRecord("Features committed in ${increment}")
+      printer.printRecords([["key", "summary", "team", "storyPoints", "fixVersion", "dependency", "GIM", "Roadmap"]] + 
+        features.collect{ feature -> [ feature.key, feature.summary, feature.team, feature.storyPoints, feature.fixVersions, feature.isDependency, feature.milestone, feature.roadmap] })
     }
     catch (IOException e) {
       println "Failed to write CSV File ${e.message}"
