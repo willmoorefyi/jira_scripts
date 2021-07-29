@@ -17,6 +17,7 @@ import static picocli.CommandLine.*
 import static groovy.json.JsonOutput.*
 
 import groovy.json.JsonSlurper
+import groovy.json.JsonOutput
 import groovy.transform.Field
 import groovy.xml.*
 
@@ -140,12 +141,22 @@ def parseResults(queryResponse) {
 }
 
 def syncValues(feature) {
-  def updateFixVersion = feature.fixVersions == feature.sprint ? null : feature.sprint
-  def updateTeam = feature.team == feature.labelTeam ? null : feature.labelTeam
+  def update = [ update: [:]]
 
-  if (updateFixVersion || updateTeam) {
+  if (feature.fixVersions != feature.sprint) {
+    feature.sprint ?
+      update.update << [ fixVersions: [[set: [[ name: feature.sprint ]] ]] ] :
+      update.update << [ fixVersions: [[set: [ ] ]] ]
+  }
+  if (feature.labelTeam && feature.team != feature.labelTeam) {
+    def scrumTeamMap = [:]
+    scrumTeamMap[scrumTeamFieldName] = [ ['set': [ 'value': feature.labelTeam ]]]
+    update.update << scrumTeamMap
+  }
+
+  if (!update.update.isEmpty()) {
     if (dryRun) {
-      println "Updating ${feature.key}: team ${updateTeam}, fixVersion: ${updateFixVersion}"
+      println "Updating ${feature.key}: ${JsonOutput.toJson(update)}"
     }
     else {
 
