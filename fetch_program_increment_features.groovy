@@ -115,6 +115,7 @@ def parseResults(queryResponse) {
     result.team = issue.fields[scrumTeamFieldName]?.value
     result.group = issue.fields[groupFieldName]?.value
     result.storyPoints = issue.fields[storyPointsFieldName]
+    result.priority = issue.fields.priority?.name
     result.fixVersions = issue.fields.fixVersions[0]?.name
     def depKeys = issue.fields.issuelinks.findResults {link ->
       if (link.type?.name == 'Dependency') link.type.inward == 'is a dependency for' ? link.inwardIssue?.key : link.outwardIssue?.key
@@ -134,6 +135,7 @@ def parseRMTickets(queryResponse) {
     result.key = issue.key
     result.summary = issue.fields.summary
     result.group = issue.fields[groupFieldName]?.value
+    result.priority = issue.fields.priority?.name
     result.dependencies = issue.fields.issuelinks.findResults { link ->
       if (link.type?.name == 'Dependency') link.type.inward == 'is a dependency for' ? link.outwardIssue?.key : link.inwardIssue?.key
     }
@@ -149,7 +151,7 @@ def executeJql(String jql, Closure callback) {
   def request = [:]
   request.jql = jql
   request.maxResults = MAX_RESULTS
-  request.fields = [ 'key', 'summary', 'issuetype', scrumTeamFieldName, groupFieldName, storyPointsFieldName, 'fixVersions', 'created', 'issuelinks', 'duedate', 'status' ]
+  request.fields = [ 'key', 'summary', 'issuetype', 'priority', scrumTeamFieldName, groupFieldName, storyPointsFieldName, 'fixVersions', 'created', 'issuelinks', 'duedate', 'status' ]
   request.expand = [ 'renderedFields' ]
 
   for (Integer startAt = 0, total = 1; startAt < total; startAt += MAX_RESULTS) {
@@ -192,7 +194,7 @@ try {
   executeJql("project = DSM AND type = Feature AND \"Target Delivery Date\" ~ ${increment}", { response ->
     parseResults(response).each { result ->
       def gim = result.links.findResult { milestones[it] }
-      features << result + [ milestone: gim?.key, roadmap: gim ? gim.roadmap.key : result.links.findResult { linkKey ->
+      features << result + [ milestone: gim?.key, roadmap: gim?.roadmap?.key ? gim.roadmap?.key : result.links.findResult { linkKey ->
         result.links.findResult { roadmaps[it]?.key } ?: roadmaps.findResult { key, rm -> rm.includes.contains(linkKey) || rm.dependencies.contains(linkKey) ? key : null }
       } ]
     }
@@ -203,14 +205,14 @@ try {
   outfile.withWriter('utf-8') { writer ->
     try(CSVPrinter printer = new CSVPrinter(writer, CSVFormat.EXCEL.withHeader())) {
       printer.printRecord("Roadmaps with committed work in ${increment}")
-      printer.printRecords([["key","summary","group","dependencies","includes"]] + roadmaps.collect{ key, rm -> [key, rm.summary, rm.group, rm.dependencies, rm.includes] })
+      printer.printRecords([["key","summary","group","priority", "dependencies","includes"]] + roadmaps.collect{ key, rm -> [key, rm.summary, rm.group, rm.priority, rm.dependencies, rm.includes] })
       printer.println()
       printer.printRecord("Initiative Milestones with committed work in ${increment}")
-      printer.printRecords([["key", "summary", "roadmap"]] + milestones.collect{ key, gim -> [key, gim.summary, gim.roadmap] })
+      printer.printRecords([["key", "summary", "priority", "Roadmap", "links"]] + milestones.collect{ key, gim -> [key, gim.summary, gim.priority, gim.roadmap?.key ?: "", gim.links] })
       printer.println()
       printer.printRecord("Features committed in ${increment}")
-      printer.printRecords([["key", "summary", "team", "storyPoints", "fixVersion", "dependency", "GIM", "Roadmap"]] + 
-        features.collect{ feature -> [ feature.key, feature.summary, feature.team, feature.storyPoints, feature.fixVersions, feature.isDependency, feature.milestone, feature.roadmap] })
+      printer.printRecords([["key", "summary", "status", "team", "storyPoints", "fixVersion", "dependency", "GIM", "Roadmap"]] + 
+        features.collect{ feature -> [ feature.key, feature.summary, feature.status, feature.team, feature.storyPoints, feature.fixVersions, feature.isDependency, feature.milestone, feature.roadmap] })
     }
     catch (IOException e) {
       println "Failed to write CSV File ${e.message}"
@@ -219,5 +221,6 @@ try {
 }
 catch (Exception e) {
   println "${e.message}"
+  org.codehaus.groovy.runtime.StackTraceUtils.sanitize(new Exception(e)).printStackTrace()
 }
 return
