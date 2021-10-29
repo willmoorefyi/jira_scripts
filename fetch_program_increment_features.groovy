@@ -117,6 +117,7 @@ def parseResults(queryResponse) {
     result.storyPoints = issue.fields[storyPointsFieldName]
     result.priority = issue.fields.priority?.name
     result.fixVersions = issue.fields.fixVersions[0]?.name
+    result.labels = issue.fields.labels
     def depKeys = issue.fields.issuelinks.findResults {link ->
       if (link.type?.name == 'Dependency') link.type.inward == 'is a dependency for' ? link.inwardIssue?.key : link.outwardIssue?.key
     }
@@ -124,6 +125,9 @@ def parseResults(queryResponse) {
       if (link.type?.name == 'Feature Composition') link.type.inward == 'includes' ? link.outwardIssue?.key : link.inwardIssue?.key
     } + depKeys
     result.isDependency = depKeys != null && !depKeys.isEmpty()
+    result.isSupport = result.labels.contains "support"
+    result.isFREQ = issue.fields.issuelinks.any { link -> link.inwardIssue?.key?.startsWith("FREQ-") || link.outwardIssue?.key?.startsWith("FREQ-") } // || issue.fields.labels.contains("FREQ")
+    result.isCR = issue.fields.issuelinks.any { link -> link.inwardIssue?.key?.startsWith("CR-") || link.outwardIssue?.key?.startsWith("CR-") }
 
     result
   }
@@ -151,7 +155,7 @@ def executeJql(String jql, Closure callback) {
   def request = [:]
   request.jql = jql
   request.maxResults = MAX_RESULTS
-  request.fields = [ 'key', 'summary', 'issuetype', 'priority', scrumTeamFieldName, groupFieldName, storyPointsFieldName, 'fixVersions', 'created', 'issuelinks', 'duedate', 'status' ]
+  request.fields = [ 'key', 'summary', 'issuetype', 'priority', scrumTeamFieldName, groupFieldName, storyPointsFieldName, 'fixVersions', 'created', 'issuelinks', 'duedate', 'status', 'labels' ]
   request.expand = [ 'renderedFields' ]
 
   for (Integer startAt = 0, total = 1; startAt < total; startAt += MAX_RESULTS) {
@@ -173,7 +177,12 @@ try {
   println "Authentication success!"
 
   // get all linked RM tickets as "includes" or "is a dependency for"
-  def roadmaps = [:]
+  def roadmaps = [
+    "SUPPORT": [key: "SUPPORT", summary: "Ongoing support and maintenance work"],
+    "DEPENDENCY": [key: "DEPENDENCY", summary: "Work that must be done to unblock another team's responsibilities, outside our cross-organization roadmap"],
+    "RM-FREQ": [key: "RM-FREQ", summary: "Feature requests from client success"],
+    "RM-CR": [key: "RM-CR", summary: "Client Requests, or enhancements to our products our clients pay us to do"]
+  ]
     executeJql("""
 (project = RM AND issueFunction in linkedIssuesOf(\"project = DSM AND type = Feature AND \\\"Target Delivery Date\\\" ~ ${increment}\", \"is part of\"))
  OR (project = RM AND issueFunction in linkedIssuesOf(\"project = DSM AND type = Feature AND \\\"Target Delivery Date\\\" ~ ${increment}\", \"is a dependency for\"))
@@ -192,11 +201,12 @@ try {
 
   def features = [ ]
   executeJql("project = DSM AND type = Feature AND \"Target Delivery Date\" ~ ${increment}", { response ->
-    parseResults(response).each { result ->
+    parseResults(response).eachWithIndex { result, idx ->
+      if (idx == 1) { println "result: ${result}" }
       def gim = result.links.findResult { milestones[it] }
-      features << result + [ milestone: gim?.key, roadmap: gim?.roadmap?.key ? gim.roadmap?.key : result.links.findResult { linkKey ->
-        result.links.findResult { roadmaps[it]?.key } ?: roadmaps.findResult { key, rm -> rm.includes.contains(linkKey) || rm.dependencies.contains(linkKey) ? key : null }
-      } ]
+      features << result + [ milestone: gim?.key, roadmap: gim?.roadmap?.key ?: result.links.findResult { linkKey ->
+        result.links.findResult { roadmaps[it]?.key } ?: roadmaps.findResult { key, rm -> rm.includes?.contains(linkKey) || rm.dependencies?.contains(linkKey) ? key : null }
+      } ?: result.isSupport ? "SUPPORT" : result.isFREQ ? "RM-FREQ" : result.isCR ? "RM-CR" : result.isDependency ? "DEPENDENCY" : null ]
     }
   })
 
@@ -211,8 +221,8 @@ try {
       printer.printRecords([["key", "summary", "priority", "Roadmap", "links"]] + milestones.collect{ key, gim -> [key, gim.summary, gim.priority, gim.roadmap?.key ?: "", gim.links] })
       printer.println()
       printer.printRecord("Features committed in ${increment}")
-      printer.printRecords([["key", "summary", "status", "team", "storyPoints", "fixVersion", "dependency", "GIM", "Roadmap"]] + 
-        features.collect{ feature -> [ feature.key, feature.summary, feature.status, feature.team, feature.storyPoints, feature.fixVersions, feature.isDependency, feature.milestone, feature.roadmap] })
+      printer.printRecords([["key", "summary", "status", "team", "storyPoints", "fixVersion", "dependency", "support", "CS Request", "GIM", "Roadmap"]] + 
+        features.collect{ feature -> [ feature.key, feature.summary, feature.status, feature.team, feature.storyPoints, feature.fixVersions, feature.isDependency, feature.isSupport, feature.isFREQ || feature.isCR, feature.milestone, feature.roadmap] })
     }
     catch (IOException e) {
       println "Failed to write CSV File ${e.message}"
