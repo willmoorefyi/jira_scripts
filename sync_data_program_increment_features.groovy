@@ -8,7 +8,7 @@ import java.util.UUID
 
 @Grab('info.picocli:picocli-groovy:4.5.2')
 @GrabConfig(systemClassLoader=true)
-@Command(name = "fetch_dsm_status",
+@Command(name = "sync_data_program_increment_features",
         version = "0.0.1",
         mixinStandardHelpOptions = true, // add --help and --version options
         description = "A command-line tool to fetch tickets, their group initiative milestone, and RM ticket, for a given program increment")
